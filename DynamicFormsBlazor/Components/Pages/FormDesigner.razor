@@ -1,0 +1,247 @@
+@page "/form-designer"
+@rendermode InteractiveServer
+@using DynamicFormsBlazor.Data
+@using DynamicFormsBlazor.Models
+@using DynamicFormsBlazor.Components
+@inject AppDbContext Db
+@inject NavigationManager Navigation
+
+<PageTitle>Form Designer</PageTitle>
+
+<h3>Form Designer</h3>
+<p>Create a dynamic form by adding fields below.</p>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="mb-3">
+            <label class="form-label">Form Name <span class="text-danger">*</span></label>
+            <input class="form-control" @bind="FormName" placeholder="e.g., Contact Form" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" @bind="FormDescription" rows="2" placeholder="Optional description"></textarea>
+        </div>
+    </div>
+</div>
+
+<h5>Fields</h5>
+
+@if (EditingFields.Count == 0)
+{
+    <div class="alert alert-info">No fields added yet. Click "Add Field" to start building your form.</div>
+}
+
+@foreach (var field in EditingFields)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Key <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="field.Key" placeholder="fieldKey" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Label <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="field.Label" placeholder="Field Label" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Type <span class="text-danger">*</span></label>
+                    <select class="form-select"
+                            @bind="field.Type"
+                            @bind:after="() => OnFieldTypeChanged(field)">
+                        @foreach (var type in FieldTypes)
+                        {
+                            <option value="@type">@type</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Placeholder</label>
+                    <input class="form-control" @bind="field.Placeholder" placeholder="Optional" />
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <button class="btn btn-danger btn-sm w-100" @onclick="@(() => RemoveField(field))" title="Remove field">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                </div>
+            </div>
+
+            @if (field.Type == DynamicForm.FormFieldType.Checkbox)
+            {
+                <div class="row g-3 mt-2">
+                    <div class="col-md-6">
+                        <label class="form-label">Checkbox Label</label>
+                        <input class="form-control" @bind="field.CheckboxLabel" placeholder="Label next to checkbox" />
+                    </div>
+                </div>
+            }
+
+            @if (field.Type == DynamicForm.FormFieldType.Select)
+            {
+                <div class="row g-3 mt-2">
+                    <div class="col-12">
+                        <label class="form-label">Options</label>
+                        @if (field.Options.Count == 0)
+                        {
+                            <div class="alert alert-warning mb-2">Add at least one option for the select field.</div>
+                        }
+                        @foreach (var option in field.Options)
+                        {
+                            <div class="input-group mb-2">
+                                <input type="text" class="form-control" @bind="option.Value" placeholder="Value" />
+                                <input type="text" class="form-control" @bind="option.Text" placeholder="Display Text" />
+                                <button class="btn btn-outline-danger" type="button" @onclick="@(() => RemoveOption(field, option))">Remove</button>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-secondary" @onclick="@(() => AddOption(field))">+ Add Option</button>
+                    </div>
+                </div>
+            }
+
+            <div class="row g-3 mt-2">
+                <div class="col-12">
+                    <label class="form-label">Help Text</label>
+                    <input class="form-control" @bind="field.HelpText" placeholder="Optional help text shown below the field" />
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="mb-3">
+    <button class="btn btn-secondary me-2" @onclick="AddField">
+        <span aria-hidden="true">+</span> Add Field
+    </button>
+    <button class="btn btn-primary" @onclick="SaveForm" >
+        💾 Save Form
+    </button>
+    <button class="btn btn-outline-secondary ms-2" @onclick="Cancel">
+        Cancel
+    </button>
+</div>
+
+@if (SaveMessage is not null)
+{
+    <div class="alert @(SaveMessage.Contains("error") || SaveMessage.Contains("Error") ? "alert-danger" : "alert-success") mt-3">
+        @SaveMessage
+    </div>
+}
+
+@code {
+    private string FormName { get; set; } = string.Empty;
+    private string? FormDescription { get; set; }
+
+    private List<FormFieldDefinition> EditingFields { get; set; } = new();
+
+    private string? SaveMessage { get; set; }
+
+    private DynamicForm.FormFieldType[] FieldTypes =
+        (DynamicForm.FormFieldType[])Enum.GetValues(typeof(DynamicForm.FormFieldType));
+
+    private bool CanSave => !string.IsNullOrWhiteSpace(FormName) && 
+                           EditingFields.Count > 0 && 
+                           EditingFields.All(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Label) &&
+                                                 (f.Type != DynamicForm.FormFieldType.Select || f.Options.Count > 0));
+
+    private void AddField()
+    {
+        Console.WriteLine("AddField clicked. Current field count: " + EditingFields.Count);
+
+        EditingFields.Add(new FormFieldDefinition
+        {
+            Key = $"field{EditingFields.Count + 1}",
+            Label = "New Field",
+            Type = DynamicForm.FormFieldType.Text
+        });
+
+        Console.WriteLine("New field count after AddField: " + EditingFields.Count);
+
+        SaveMessage = null;
+    }
+
+    private void RemoveField(FormFieldDefinition field)
+    {
+        EditingFields.Remove(field);
+        SaveMessage = null;
+    }
+
+    private void OnFieldTypeChanged(FormFieldDefinition field)
+    {
+        // Clear options if switching away from Select
+        if (field.Type != DynamicForm.FormFieldType.Select)
+        {
+            field.Options.Clear();
+        }
+        // Add one option if switching to Select and has none
+        else if (field.Options.Count == 0)
+        {
+            AddOption(field);
+        }
+    }
+
+    private void AddOption(FormFieldDefinition field)
+    {
+        field.Options.Add(new FormFieldOptionDefinition
+        {
+            Value = $"option{field.Options.Count + 1}",
+            Text = $"Option {field.Options.Count + 1}"
+        });
+    }
+
+    private void RemoveOption(FormFieldDefinition field, FormFieldOptionDefinition option)
+    {
+        field.Options.Remove(option);
+    }
+
+    private async Task SaveForm()
+    {
+        if (!CanSave)
+        {
+            SaveMessage = "Error: Please fill in all required fields (Form Name, and all field Keys/Labels). Select fields must have at least one option.";
+            return;
+        }
+
+        try
+        {
+            var form = new FormDefinition
+            {
+                Name = FormName.Trim(),
+                Description = FormDescription?.Trim(),
+                Fields = EditingFields.Select(f => new FormFieldDefinition
+                {
+                    Key = f.Key.Trim(),
+                    Label = f.Label.Trim(),
+                    Type = f.Type,
+                    Placeholder = f.Placeholder?.Trim(),
+                    CheckboxLabel = f.CheckboxLabel?.Trim(),
+                    HelpText = f.HelpText?.Trim(),
+                    Options = f.Options.Select(o => new FormFieldOptionDefinition
+                    {
+                        Value = o.Value.Trim(),
+                        Text = o.Text.Trim()
+                    }).ToList()
+                }).ToList()
+            };
+
+            Db.FormDefinitions.Add(form);
+            await Db.SaveChangesAsync();
+
+            SaveMessage = $"✅ Form saved successfully! Form ID: {form.Id}";
+            
+            // Optionally navigate to view the form
+            await Task.Delay(1500);
+            Navigation.NavigateTo($"/fill-form/{form.Id}");
+        }
+        catch (Exception ex)
+        {
+            SaveMessage = $"Error saving form: {ex.Message}";
+        }
+    }
+
+    private void Cancel()
+    {
+        Navigation.NavigateTo("/");
+    }
+}
+

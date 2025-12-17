@@ -1,0 +1,181 @@
+@page "/fill-form"
+@page "/fill-form/{FormId:int?}"
+@using DynamicFormsBlazor.Data
+@using DynamicFormsBlazor.Models
+@using DynamicFormsBlazor.Components
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext Db
+@inject NavigationManager Navigation
+
+<PageTitle>Fill Form</PageTitle>
+
+@if (IsLoading)
+{
+    <div class="text-center">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Loading...</p>
+    </div>
+}
+else if (FormId is null)
+{
+    <h3>Forms</h3>
+
+    @if (AllForms.Count == 0)
+    {
+        <div class="alert alert-info">
+            No forms found. Go to the <a href="/form-designer">Form Designer</a> to create one.
+        </div>
+    }
+    else
+    {
+        <div class="list-group">
+            @foreach (var form in AllForms)
+            {
+                <a class="list-group-item list-group-item-action"
+                   href="@($"/fill-form/{form.Id}")">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1">@form.Name</h5>
+                        <small class="text-muted">ID: @form.Id</small>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(form.Description))
+                    {
+                        <p class="mb-1 text-muted">@form.Description</p>
+                    }
+                </a>
+            }
+        </div>
+    }
+}
+else if (FormDefinition is null)
+{
+    <div class="alert alert-warning">
+        <h4>Form Not Found</h4>
+        <p>The form with ID @FormId could not be found.</p>
+        <button class="btn btn-primary" @onclick="@(() => Navigation.NavigateTo("/fill-form"))">Back to Forms</button>
+    </div>
+}
+else
+{
+    <div class="mb-3">
+        <h3>@FormDefinition.Name</h3>
+        @if (!string.IsNullOrWhiteSpace(FormDefinition.Description))
+        {
+            <p class="text-muted">@FormDefinition.Description</p>
+        }
+    </div>
+
+    <DynamicForm Fields="Fields"
+                 Values="Values"
+                 SubmitText="Submit"
+                 OnSubmit="HandleSubmit" />
+
+    @if (LastSubmittedJson is not null)
+    {
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5>✅ Form Submitted Successfully</h5>
+            </div>
+            <div class="card-body">
+                <p>Submitted values:</p>
+                <pre class="bg-light p-3 rounded">@LastSubmittedJson</pre>
+                <button class="btn btn-primary" @onclick="ResetForm">Fill Again</button>
+                <button class="btn btn-outline-secondary ms-2" @onclick="@(() => Navigation.NavigateTo("/form-designer"))">Create New Form</button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int? FormId { get; set; }
+
+    private List<FormDefinition> AllForms { get; set; } = new();
+    private FormDefinition? FormDefinition { get; set; }
+    private List<DynamicForm.FormField>? Fields;
+    private Dictionary<string, object?> Values = new();
+    private string? LastSubmittedJson;
+    private bool IsLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Always load form list
+            AllForms = await Db.FormDefinitions
+                .OrderBy(f => f.Name)
+                .ToListAsync();
+
+            // If a specific form ID is requested, load that form
+            if (FormId is not null)
+            {
+                FormDefinition = await Db.FormDefinitions
+                    .Include(f => f.Fields)
+                    .ThenInclude(f => f.Options)
+                    .FirstOrDefaultAsync(f => f.Id == FormId.Value);
+
+                if (FormDefinition is not null)
+                {
+                    Fields = FormDefinition.Fields.Select(f => new DynamicForm.FormField
+                    {
+                        Key = f.Key,
+                        Label = f.Label,
+                        Type = f.Type,
+                        Placeholder = f.Placeholder,
+                        CheckboxLabel = f.CheckboxLabel,
+                        HelpText = f.HelpText,
+                        DefaultValue = ParseDefaultValue(f.DefaultValueJson),
+                        Options = f.Options.Select(o => new DynamicForm.FormFieldOption
+                        {
+                            Value = o.Value,
+                            Text = o.Text
+                        }).ToList()
+                    }).ToList();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log error in production
+            Console.WriteLine($"Error loading forms: {ex.Message}");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private object? ParseDefaultValue(string? defaultValueJson)
+    {
+        if (string.IsNullOrWhiteSpace(defaultValueJson))
+            return null;
+
+        try
+        {
+            // Try to parse as JSON, fallback to string
+            return System.Text.Json.JsonSerializer.Deserialize<object>(defaultValueJson);
+        }
+        catch
+        {
+            return defaultValueJson;
+        }
+    }
+
+    private void HandleSubmit(Dictionary<string, object?> values)
+    {
+        LastSubmittedJson = System.Text.Json.JsonSerializer.Serialize(
+            values,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        
+        // Here you could also save the submitted form data to another table if needed
+        // For example: Db.FormSubmissions.Add(new FormSubmission { FormId = FormId, Data = values });
+        // await Db.SaveChangesAsync();
+    }
+
+    private void ResetForm()
+    {
+        LastSubmittedJson = null;
+        Values = new Dictionary<string, object?>();
+    }
+}
+

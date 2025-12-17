@@ -1,0 +1,206 @@
+@using System.Collections.Generic
+
+<div class="card">
+    <div class="card-body">
+        <form @onsubmit="HandleSubmit">
+            @foreach (var field in Fields)
+            {
+                <div class="mb-3">
+                    <label class="form-label">@field.Label</label>
+
+                    @switch (field.Type)
+                    {
+                        case FormFieldType.Text:
+                            <input class="form-control"
+                                   type="text"
+                                   placeholder="@field.Placeholder"
+                                   value="@GetStringValue(field.Key)"
+                                   @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                            break;
+
+                        case FormFieldType.Number:
+                            <input class="form-control"
+                                   type="number"
+                                   placeholder="@field.Placeholder"
+                                   value="@GetStringValue(field.Key)"
+                                   @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                            break;
+
+                        case FormFieldType.Date:
+                            <input class="form-control"
+                                   type="date"
+                                   value="@GetStringValue(field.Key)"
+                                   @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                            break;
+
+                        case FormFieldType.Checkbox:
+                            <div class="form-check">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       checked="@(GetBoolValue(field.Key))"
+                                       @onchange="e => SetBoolValue(field.Key, (bool?)e.Value ?? false)" />
+                                <label class="form-check-label">@field.CheckboxLabel</label>
+                            </div>
+                            break;
+
+                        case FormFieldType.Select:
+                            <select class="form-select"
+                                    value="@GetStringValue(field.Key)"
+                                    @onchange="e => SetStringValue(field.Key, e.Value?.ToString())">
+                                @if (!string.IsNullOrWhiteSpace(field.Placeholder))
+                                {
+                                    <option value="">@field.Placeholder</option>
+                                }
+
+                                @if (field.Options is not null)
+                                {
+                                    @foreach (var option in field.Options)
+                                    {
+                                        <option value="@option.Value">@option.Text</option>
+                                    }
+                                }
+                            </select>
+                            break;
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(field.HelpText))
+                    {
+                        <div class="form-text">@field.HelpText</div>
+                    }
+                </div>
+            }
+
+            <button type="submit" class="btn btn-primary">@SubmitText</button>
+        </form>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public List<FormField> Fields { get; set; } = new();
+
+    [Parameter]
+    public string SubmitText { get; set; } = "Submit";
+
+    /// <summary>
+    /// The current form values. The key is the field Key, the value is the user input.
+    /// </summary>
+    [Parameter]
+    public Dictionary<string, object?> Values { get; set; } = new();
+
+    /// <summary>
+    /// Fired when the user submits the form.
+    /// </summary>
+    [Parameter]
+    public EventCallback<Dictionary<string, object?>> OnSubmit { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Ensure all fields have an entry in the values dictionary
+        foreach (var field in Fields)
+        {
+            if (!Values.ContainsKey(field.Key))
+            {
+                Values[field.Key] = field.DefaultValue;
+            }
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (OnSubmit.HasDelegate)
+        {
+            await OnSubmit.InvokeAsync(Values);
+        }
+    }
+
+    private string GetStringValue(string key)
+    {
+        if (Values.TryGetValue(key, out var value) && value is not null)
+        {
+            return Convert.ToString(value) ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private void SetStringValue(string key, string? value)
+    {
+        Values[key] = value;
+    }
+
+    private bool GetBoolValue(string key)
+    {
+        if (Values.TryGetValue(key, out var value) && value is bool b)
+        {
+            return b;
+        }
+
+        return false;
+    }
+
+    private void SetBoolValue(string key, bool value)
+    {
+        Values[key] = value;
+    }
+
+    public enum FormFieldType
+    {
+        Text,
+        Number,
+        Date,
+        Checkbox,
+        Select
+    }
+
+    public class FormField
+    {
+        /// <summary>
+        /// Unique key for this field; used to store values in the dictionary.
+        /// </summary>
+        public string Key { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Label shown above the input.
+        /// </summary>
+        public string Label { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Type of control to render.
+        /// </summary>
+        public FormFieldType Type { get; set; }
+
+        /// <summary>
+        /// Optional placeholder for text/number/select fields.
+        /// </summary>
+        public string? Placeholder { get; set; }
+
+        /// <summary>
+        /// Optional label used for checkbox controls.
+        /// </summary>
+        public string? CheckboxLabel { get; set; }
+
+        /// <summary>
+        /// Optional help text shown under the field.
+        /// </summary>
+        public string? HelpText { get; set; }
+
+        /// <summary>
+        /// Optional default value for this field.
+        /// </summary>
+        public object? DefaultValue { get; set; }
+
+        /// <summary>
+        /// Options for select controls.
+        /// </summary>
+        public List<FormFieldOption>? Options { get; set; }
+    }
+
+    public class FormFieldOption
+    {
+        public string Value { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+    }
+}
+
+
