@@ -1,4 +1,6 @@
 @using System.Collections.Generic
+@using System.Linq
+@using System.Text.RegularExpressions
 
 <div class="card">
     <div class="card-body">
@@ -6,9 +8,9 @@
             @foreach (var field in Fields)
             {
                 <div class="mb-3">
-                    @if (field.Type != FormFieldType.Checkbox)
+                    @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText)
                     {
-                        <label class="form-label">@field.Label</label>
+                        <label class="form-label">@((MarkupString)ReplaceVariables(field.Label, field))</label>
                     }
 
                     @switch (field.Type)
@@ -42,7 +44,7 @@
                                        type="checkbox"
                                        checked="@(GetBoolValue(field.Key))"
                                        @onchange="e => SetBoolValue(field.Key, (bool?)e.Value ?? false)" />
-                                <label class="form-check-label">@field.CheckboxLabel</label>
+                                <label class="form-check-label">@((MarkupString)ReplaceVariables(field.CheckboxLabel ?? field.Label, field))</label>
                             </div>
                             break;
 
@@ -66,14 +68,27 @@
                             break;
 
                         case FormFieldType.StaticText:
-                            <p class="mb-0">@field.Label</p>
+                            <p class="mb-0 fs-5">@((MarkupString)ReplaceVariables(field.Label, field))</p>
                             break;
                     }
 
                     @if (!string.IsNullOrWhiteSpace(field.HelpText))
                     {
-                        <div class="form-text">@field.HelpText</div>
+                        <div class="form-text">@((MarkupString)ReplaceVariables(field.HelpText, field))</div>
                     }
+                </div>
+            }
+
+            @* Always show total if there are priced fields *@
+            @if (HasPricedFields)
+            {
+                <div class="card bg-light mb-3">
+                    <div class="card-body py-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="fw-bold">Grand Total:</span>
+                            <span class="text-success fw-bold fs-4">@CalculateTotal().ToString("C")</span>
+                        </div>
+                    </div>
                 </div>
             }
 
@@ -121,6 +136,8 @@
         }
     }
 
+    #region Value Getters/Setters
+
     private string GetStringValue(string key)
     {
         if (Values.TryGetValue(key, out var value) && value is not null)
@@ -134,6 +151,7 @@
     private void SetStringValue(string key, string? value)
     {
         Values[key] = value;
+        StateHasChanged(); // Trigger re-render for variable updates
     }
 
     private bool GetBoolValue(string key)
@@ -149,7 +167,121 @@
     private void SetBoolValue(string key, bool value)
     {
         Values[key] = value;
+        StateHasChanged(); // Trigger re-render for variable updates
     }
+
+    #endregion
+
+    #region Price Calculations
+
+    /// <summary>
+    /// Check if any field has a price set.
+    /// </summary>
+    private bool HasPricedFields => Fields.Any(f => f.Price.HasValue && f.Price.Value > 0);
+
+    /// <summary>
+    /// Get the current calculated total of all priced fields.
+    /// This can be called from parent components via @ref.
+    /// </summary>
+    public decimal GetTotal() => CalculateTotal();
+
+    /// <summary>
+    /// Calculate the subtotal for a specific field based on its type and current value.
+    /// </summary>
+    private decimal CalculateSubtotal(FormField field)
+    {
+        if (!field.Price.HasValue || field.Price.Value == 0)
+            return 0;
+
+        switch (field.Type)
+        {
+            case FormFieldType.Checkbox:
+                // Add price if checked
+                return GetBoolValue(field.Key) ? field.Price.Value : 0;
+
+            case FormFieldType.Number:
+                // Multiply price by quantity
+                var numStr = GetStringValue(field.Key);
+                if (decimal.TryParse(numStr, out var qty) && qty > 0)
+                    return field.Price.Value * qty;
+                return 0;
+
+            case FormFieldType.Select:
+                // If selected value is numeric, multiply by price; otherwise just add price if selected
+                var selStr = GetStringValue(field.Key);
+                if (string.IsNullOrEmpty(selStr))
+                    return 0;
+                // Try to parse as number
+                if (decimal.TryParse(selStr, out var selQty))
+                {
+                    // If numeric (including 0), multiply by price
+                    return selQty >= 0 ? field.Price.Value * selQty : 0;
+                }
+                // Non-numeric selection (like "yes", "option1"): just add price once
+                return field.Price.Value;
+
+            default:
+                return 0;
+        }
+    }
+
+    /// <summary>
+    /// Calculate the grand total of all priced fields.
+    /// </summary>
+    private decimal CalculateTotal()
+    {
+        decimal total = 0;
+        foreach (var field in Fields)
+        {
+            total += CalculateSubtotal(field);
+            Console.WriteLine($"Field: {field.Key}, Subtotal: {CalculateSubtotal(field)}");
+        }
+        return total;
+    }
+
+    #endregion
+
+    #region Variable Replacement
+
+    /// <summary>
+    /// Replace variables like {price}, {subtotal}, {total} in text.
+    /// </summary>
+    private string ReplaceVariables(string? text, FormField currentField)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+
+        var result = text;
+
+        // {price} - the price of the current field
+        if (result.Contains("{price}"))
+        {
+            var priceStr = currentField.Price.HasValue 
+                ? currentField.Price.Value.ToString("C") 
+                : "$0.00";
+            result = result.Replace("{price}", $"<span class=\"text-primary fw-bold\">{priceStr}</span>");
+        }
+
+        // {subtotal} - the calculated subtotal for the current field
+        if (result.Contains("{subtotal}"))
+        {
+            var subtotal = CalculateSubtotal(currentField);
+            result = result.Replace("{subtotal}", $"<span class=\"text-success fw-bold\">{subtotal:C}</span>");
+        }
+
+        // {total} - the grand total of all fields
+        if (result.Contains("{total}"))
+        {
+            var total = CalculateTotal();
+            result = result.Replace("{total}", $"<span class=\"text-success fw-bold fs-4\">{total:C}</span>");
+        }
+
+        return result;
+    }
+
+    #endregion
+
+    #region Types
 
     public enum FormFieldType
     {
@@ -169,7 +301,7 @@
         public string Key { get; set; } = string.Empty;
 
         /// <summary>
-        /// Label shown above the input.
+        /// Label shown above the input. Supports {price}, {subtotal}, {total} variables.
         /// </summary>
         public string Label { get; set; } = string.Empty;
 
@@ -184,12 +316,12 @@
         public string? Placeholder { get; set; }
 
         /// <summary>
-        /// Optional label used for checkbox controls.
+        /// Optional label used for checkbox controls. Supports {price}, {subtotal}, {total} variables.
         /// </summary>
         public string? CheckboxLabel { get; set; }
 
         /// <summary>
-        /// Optional help text shown under the field.
+        /// Optional help text shown under the field. Supports {price}, {subtotal}, {total} variables.
         /// </summary>
         public string? HelpText { get; set; }
 
@@ -197,6 +329,11 @@
         /// Optional default value for this field.
         /// </summary>
         public object? DefaultValue { get; set; }
+
+        /// <summary>
+        /// Optional price for calculations. Used with {price}, {subtotal}, {total} variables.
+        /// </summary>
+        public decimal? Price { get; set; }
 
         /// <summary>
         /// Options for select controls.
@@ -209,6 +346,6 @@
         public string Value { get; set; } = string.Empty;
         public string Text { get; set; } = string.Empty;
     }
+
+    #endregion
 }
-
-

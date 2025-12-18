@@ -71,7 +71,8 @@ else
 
     <div class="row justify-content-center">
         <div class="col-lg-8 col-md-10">
-            <DynamicForm Fields="Fields"
+            <DynamicForm @ref="DynamicFormRef"
+                         Fields="Fields"
                          Values="Values"
                          SubmitText="Submit"
                          OnSubmit="HandleSubmit" />
@@ -84,6 +85,7 @@ else
     [Parameter] public int? FormId { get; set; }
 
     private Toast? ToastRef;
+    private DynamicForm? DynamicFormRef;
 
     private List<FormDefinition> AllForms { get; set; } = new();
     private FormDefinition? FormDefinition { get; set; }
@@ -121,6 +123,7 @@ else
                         CheckboxLabel = f.CheckboxLabel,
                         HelpText = f.HelpText,
                         DefaultValue = ParseDefaultValue(f.DefaultValueJson),
+                        Price = f.Price,
                         Options = f.Options.Select(o => new DynamicForm.FormFieldOption
                         {
                             Value = o.Value,
@@ -170,11 +173,15 @@ else
         try
         {
             var rawJson = System.Text.Json.JsonSerializer.Serialize(values);
+            
+            // Get the calculated total from the DynamicForm component
+            var totalAmount = DynamicFormRef?.GetTotal() ?? 0;
 
             var submission = new FormSubmission
             {
                 FormDefinitionId = FormId.Value,
-                DataJson = rawJson
+                DataJson = rawJson,
+                TotalAmount = totalAmount
             };
 
             Db.FormSubmissions.Add(submission);
@@ -182,7 +189,10 @@ else
 
             if (ToastRef is not null)
             {
-                await ToastRef.ShowAsync("Form submitted successfully!", "success");
+                var message = totalAmount > 0 
+                    ? $"Form submitted successfully! Total: {totalAmount:C}" 
+                    : "Form submitted successfully!";
+                await ToastRef.ShowAsync(message, "success");
             }
         }
         catch (Exception ex)

@@ -28,6 +28,11 @@ public class FormFieldDefinition
     public string? HelpText { get; set; }
     public string? DefaultValueJson { get; set; }
 
+    /// <summary>
+    /// Optional price for this field. Used with {price}, {subtotal}, {total} variables.
+    /// </summary>
+    public decimal? Price { get; set; }
+
     public List<FormFieldOptionDefinition> Options { get; set; } = new();
 }
 

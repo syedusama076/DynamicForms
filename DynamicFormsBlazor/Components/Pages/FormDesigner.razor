@@ -113,6 +113,24 @@
                     </div>
                 </div>
             }
+
+            @* Price field for Checkbox, Number, Select *@
+            @if (field.Type == DynamicForm.FormFieldType.Checkbox || 
+                 field.Type == DynamicForm.FormFieldType.Number || 
+                 field.Type == DynamicForm.FormFieldType.Select)
+            {
+                <div class="row g-3 mt-2">
+                    <div class="col-md-3">
+                        <label class="form-label">Price ($)</label>
+                        <input type="number" class="form-control" @bind="field.Price" placeholder="0.00" step="0.01" min="0" />
+                    </div>
+                    <div class="col-md-9 d-flex align-items-end">
+                        <small class="text-muted">
+                            Use <code>{price}</code> in label to show price, <code>{subtotal}</code> for calculated amount, <code>{total}</code> in StaticText for grand total.
+                        </small>
+                    </div>
+                </div>
+            }
         </div>
     </div>
 }
@@ -222,6 +240,7 @@
                     Placeholder = f.Placeholder?.Trim(),
                     CheckboxLabel = f.CheckboxLabel?.Trim(),
                     HelpText = f.HelpText?.Trim(),
+                    Price = f.Price,
                     Options = f.Options.Select(o => new FormFieldOptionDefinition
                     {
                         Value = o.Value.Trim(),

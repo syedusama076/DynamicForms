@@ -16,6 +16,11 @@ public class FormSubmission
     /// Raw submitted values stored as JSON (key/value pairs).
     /// </summary>
     public string DataJson { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Calculated total amount from all priced fields.
+    /// </summary>
+    public decimal TotalAmount { get; set; }
 }
 
 
