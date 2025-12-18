@@ -33,6 +33,17 @@ public class FormFieldDefinition
     /// </summary>
     public decimal? Price { get; set; }
 
+    /// <summary>
+    /// Optional parent field key. If set, this field is only visible when the parent checkbox is checked.
+    /// </summary>
+    public string? ParentFieldKey { get; set; }
+
+    /// <summary>
+    /// Comma-separated list of field keys that are mutually exclusive with this checkbox.
+    /// When this checkbox is checked, all fields in this list will be unchecked.
+    /// </summary>
+    public string? MutuallyExclusiveWith { get; set; }
+
     public List<FormFieldOptionDefinition> Options { get; set; } = new();
 }
 

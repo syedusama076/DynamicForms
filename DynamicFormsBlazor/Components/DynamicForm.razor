@@ -7,76 +7,103 @@
         <form @onsubmit="HandleSubmit">
             @foreach (var field in Fields)
             {
-                <div class="mb-3">
-                    @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText)
-                    {
-                        <label class="form-label">@((MarkupString)ReplaceVariables(field.Label, field))</label>
-                    }
+                @if (IsFieldVisible(field))
+                {
+                    var nestingLevel = GetNestingLevel(field);
+                    var marginLeft = nestingLevel * 24; // 24px per nesting level
 
-                    @switch (field.Type)
-                    {
-                        case FormFieldType.Text:
-                            <input class="form-control"
-                                   type="text"
-                                   placeholder="@field.Placeholder"
-                                   value="@GetStringValue(field.Key)"
-                                   @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
-                            break;
+                    <div class="mb-3" style="@(nestingLevel > 0 ? $"margin-left: {marginLeft}px; padding-left: 12px; border-left: 2px solid #dee2e6;" : "")">
+                        @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText && field.Type != FormFieldType.RadioGroup)
+                        {
+                            <label class="form-label">@((MarkupString)ReplaceVariables(field.Label, field))</label>
+                        }
 
-                        case FormFieldType.Number:
-                            <input class="form-control"
-                                   type="number"
-                                   placeholder="@field.Placeholder"
-                                   value="@GetStringValue(field.Key)"
-                                   @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
-                            break;
+                        @switch (field.Type)
+                        {
+                            case FormFieldType.Text:
+                                <input class="form-control"
+                                       type="text"
+                                       placeholder="@field.Placeholder"
+                                       value="@GetStringValue(field.Key)"
+                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                                break;
 
-                        case FormFieldType.Date:
-                            <input class="form-control"
-                                   type="date"
-                                   value="@GetStringValue(field.Key)"
-                                   @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
-                            break;
+                            case FormFieldType.Number:
+                                <input class="form-control"
+                                       type="number"
+                                       placeholder="@field.Placeholder"
+                                       value="@GetStringValue(field.Key)"
+                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                                break;
 
-                        case FormFieldType.Checkbox:
-                            <div class="form-check">
-                                <input class="form-check-input"
-                                       type="checkbox"
-                                       checked="@(GetBoolValue(field.Key))"
-                                       @onchange="e => SetBoolValue(field.Key, (bool?)e.Value ?? false)" />
-                                <label class="form-check-label">@((MarkupString)ReplaceVariables(field.CheckboxLabel ?? field.Label, field))</label>
-                            </div>
-                            break;
+                            case FormFieldType.Date:
+                                <input class="form-control"
+                                       type="date"
+                                       value="@GetStringValue(field.Key)"
+                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                                break;
 
-                        case FormFieldType.Select:
-                            <select class="form-select"
-                                    value="@GetStringValue(field.Key)"
-                                    @onchange="e => SetStringValue(field.Key, e.Value?.ToString())">
-                                @if (!string.IsNullOrWhiteSpace(field.Placeholder))
-                                {
-                                    <option value="">@field.Placeholder</option>
-                                }
+                            case FormFieldType.Checkbox:
+                                <div class="form-check">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           checked="@(GetBoolValue(field.Key))"
+                                           @onchange="e => SetCheckboxValue(field.Key, (bool?)e.Value ?? false)" />
+                                    <label class="form-check-label">@((MarkupString)ReplaceVariables(field.CheckboxLabel ?? field.Label, field))</label>
+                                </div>
+                                break;
 
-                                @if (field.Options is not null)
+                            case FormFieldType.RadioGroup:
+                                @if (field.Options is not null && field.Options.Count > 0)
                                 {
                                     @foreach (var option in field.Options)
                                     {
-                                        <option value="@option.Value">@option.Text</option>
+                                        <div class="form-check">
+                                            <input class="form-check-input"
+                                                   type="radio"
+                                                   name="@field.Key"
+                                                   id="@($"{field.Key}_{option.Value}")"
+                                                   value="@option.Value"
+                                                   checked="@(GetStringValue(field.Key) == option.Value)"
+                                                   @onchange="e => SetStringValue(field.Key, option.Value)" />
+                                            <label class="form-check-label" for="@($"{field.Key}_{option.Value}")">
+                                                @((MarkupString)ReplaceVariablesForOption(option.Text, field))
+                                            </label>
+                                        </div>
                                     }
                                 }
-                            </select>
-                            break;
+                                break;
 
-                        case FormFieldType.StaticText:
-                            <p class="mb-0 fs-5">@((MarkupString)ReplaceVariables(field.Label, field))</p>
-                            break;
-                    }
+                            case FormFieldType.Select:
+                                <select class="form-select"
+                                        value="@GetStringValue(field.Key)"
+                                        @onchange="e => SetStringValue(field.Key, e.Value?.ToString())">
+                                    @if (!string.IsNullOrWhiteSpace(field.Placeholder))
+                                    {
+                                        <option value="">@field.Placeholder</option>
+                                    }
 
-                    @if (!string.IsNullOrWhiteSpace(field.HelpText))
-                    {
-                        <div class="form-text">@((MarkupString)ReplaceVariables(field.HelpText, field))</div>
-                    }
-                </div>
+                                    @if (field.Options is not null)
+                                    {
+                                        @foreach (var option in field.Options)
+                                        {
+                                            <option value="@option.Value">@option.Text</option>
+                                        }
+                                    }
+                                </select>
+                                break;
+
+                            case FormFieldType.StaticText:
+                                <p class="mb-0 fw-semibold">@((MarkupString)ReplaceVariables(field.Label, field))</p>
+                                break;
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(field.HelpText))
+                        {
+                            <div class="form-text">@((MarkupString)ReplaceVariables(field.HelpText, field))</div>
+                        }
+                    </div>
+                }
             }
 
             @* Always show total if there are priced fields *@
@@ -136,6 +163,92 @@
         }
     }
 
+    #region Nesting / Conditional Visibility
+
+    /// <summary>
+    /// Check if a field should be visible based on its parent's state.
+    /// </summary>
+    private bool IsFieldVisible(FormField field)
+    {
+        // No parent = always visible
+        if (string.IsNullOrEmpty(field.ParentFieldKey))
+            return true;
+
+        // Find the parent field
+        var parent = Fields.FirstOrDefault(f => f.Key == field.ParentFieldKey);
+        if (parent == null)
+            return true; // Parent not found, show anyway
+
+        // Check if parent is visible first (recursive)
+        if (!IsFieldVisible(parent))
+            return false;
+
+        // StaticText parent = always show children (no condition)
+        if (parent.Type == FormFieldType.StaticText)
+        {
+            return true;
+        }
+
+        // Checkbox parent = must be checked
+        if (parent.Type == FormFieldType.Checkbox)
+        {
+            return GetBoolValue(parent.Key);
+        }
+
+        // For other parent types, show if parent has a value
+        var parentValue = GetStringValue(parent.Key);
+        return !string.IsNullOrEmpty(parentValue);
+    }
+
+    /// <summary>
+    /// Get the nesting level of a field (0 = root, 1 = child, 2 = grandchild, etc.)
+    /// </summary>
+    private int GetNestingLevel(FormField field)
+    {
+        int level = 0;
+        var currentKey = field.ParentFieldKey;
+
+        while (!string.IsNullOrEmpty(currentKey))
+        {
+            level++;
+            var parent = Fields.FirstOrDefault(f => f.Key == currentKey);
+            currentKey = parent?.ParentFieldKey;
+
+            // Safety check to prevent infinite loops
+            if (level > 10) break;
+        }
+
+        return level;
+    }
+
+    /// <summary>
+    /// Clear values of all child fields when a parent is unchecked.
+    /// </summary>
+    private void ClearChildValues(string parentKey)
+    {
+        var children = Fields.Where(f => f.ParentFieldKey == parentKey);
+        foreach (var child in children)
+        {
+            if (child.Type == FormFieldType.Checkbox)
+            {
+                Values[child.Key] = false;
+            }
+            else if (child.Type == FormFieldType.RadioGroup)
+            {
+                Values[child.Key] = null;
+            }
+            else if (child.Type != FormFieldType.StaticText)
+            {
+                Values[child.Key] = null;
+            }
+
+            // Recursively clear grandchildren
+            ClearChildValues(child.Key);
+        }
+    }
+
+    #endregion
+
     #region Value Getters/Setters
 
     private string GetStringValue(string key)
@@ -170,6 +283,41 @@
         StateHasChanged(); // Trigger re-render for variable updates
     }
 
+    /// <summary>
+    /// Set checkbox value and clear children if unchecked.
+    /// Also handles mutually exclusive fields.
+    /// </summary>
+    private void SetCheckboxValue(string key, bool value)
+    {
+        Values[key] = value;
+
+        // If checking this checkbox, handle mutually exclusive fields
+        if (value)
+        {
+            var field = Fields.FirstOrDefault(f => f.Key == key);
+            if (field?.MutuallyExclusiveWith != null)
+            {
+                foreach (var exclusiveKey in field.MutuallyExclusiveWith)
+                {
+                    // Uncheck the mutually exclusive field
+                    if (Values.ContainsKey(exclusiveKey))
+                    {
+                        Values[exclusiveKey] = false;
+                        // Also clear its children
+                        ClearChildValues(exclusiveKey);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // If unchecking, clear all child field values
+            ClearChildValues(key);
+        }
+
+        StateHasChanged();
+    }
+
     #endregion
 
     #region Price Calculations
@@ -187,9 +335,14 @@
 
     /// <summary>
     /// Calculate the subtotal for a specific field based on its type and current value.
+    /// Only calculates if the field is visible.
     /// </summary>
     private decimal CalculateSubtotal(FormField field)
     {
+        // Only calculate for visible fields
+        if (!IsFieldVisible(field))
+            return 0;
+
         if (!field.Price.HasValue || field.Price.Value == 0)
             return 0;
 
@@ -207,6 +360,7 @@
                 return 0;
 
             case FormFieldType.Select:
+            case FormFieldType.RadioGroup:
                 // If selected value is numeric, multiply by price; otherwise just add price if selected
                 var selStr = GetStringValue(field.Key);
                 if (string.IsNullOrEmpty(selStr))
@@ -234,7 +388,6 @@
         foreach (var field in Fields)
         {
             total += CalculateSubtotal(field);
-            Console.WriteLine($"Field: {field.Key}, Subtotal: {CalculateSubtotal(field)}");
         }
         return total;
     }
@@ -279,6 +432,28 @@
         return result;
     }
 
+    /// <summary>
+    /// Replace variables for radio option text (uses field's price for {price}).
+    /// </summary>
+    private string ReplaceVariablesForOption(string? text, FormField parentField)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+
+        var result = text;
+
+        // {price} - the price of the parent field
+        if (result.Contains("{price}"))
+        {
+            var priceStr = parentField.Price.HasValue 
+                ? parentField.Price.Value.ToString("C") 
+                : "$0.00";
+            result = result.Replace("{price}", $"<span class=\"text-primary fw-bold\">{priceStr}</span>");
+        }
+
+        return result;
+    }
+
     #endregion
 
     #region Types
@@ -290,7 +465,8 @@
         Date,
         Checkbox,
         Select,
-        StaticText
+        StaticText,
+        RadioGroup
     }
 
     public class FormField
@@ -336,7 +512,20 @@
         public decimal? Price { get; set; }
 
         /// <summary>
-        /// Options for select controls.
+        /// Optional parent field key. If set, this field is only visible when the parent checkbox is checked,
+        /// or always visible if parent is StaticText.
+        /// </summary>
+        public string? ParentFieldKey { get; set; }
+
+        /// <summary>
+        /// Optional list of field keys that are mutually exclusive with this checkbox.
+        /// When this checkbox is checked, all fields in this list will be unchecked (and their children cleared).
+        /// Example: "I will attend" and "I am unable to attend" should be mutually exclusive.
+        /// </summary>
+        public List<string>? MutuallyExclusiveWith { get; set; }
+
+        /// <summary>
+        /// Options for select and radio group controls.
         /// </summary>
         public List<FormFieldOption>? Options { get; set; }
     }

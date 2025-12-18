@@ -43,14 +43,14 @@
                     <label class="form-label">Key <span class="text-danger">*</span></label>
                     <input class="form-control" @bind="field.Key" placeholder="fieldKey" />
                 </div>
-                @if (field.Type != DynamicForm.FormFieldType.Checkbox)
+                @if (field.Type != DynamicForm.FormFieldType.Checkbox && field.Type != DynamicForm.FormFieldType.RadioGroup)
                 {
                     <div class="col-md-3">
                         <label class="form-label">@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text" : "Label") <span class="text-danger">*</span></label>
-                        <input class="form-control" @bind="field.Label" placeholder="@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text to display (no input field)" : "Field Label")" />
+                        <input class="form-control" @bind="field.Label" placeholder="@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text to display" : "Field Label")" />
                     </div>
                 }
-                <div class="@(field.Type == DynamicForm.FormFieldType.Checkbox ? "col-md-2" : "col-md-2")">
+                <div class="@(field.Type == DynamicForm.FormFieldType.Checkbox || field.Type == DynamicForm.FormFieldType.RadioGroup ? "col-md-2" : "col-md-2")">
                     <label class="form-label">Type <span class="text-danger">*</span></label>
                     <select class="form-select"
                             @bind="field.Type"
@@ -61,7 +61,7 @@
                         }
                     </select>
                 </div>
-                <div class="@(field.Type == DynamicForm.FormFieldType.Checkbox ? "col-md-6" : "col-md-3")">
+                <div class="@(field.Type == DynamicForm.FormFieldType.Checkbox || field.Type == DynamicForm.FormFieldType.RadioGroup ? "col-md-6" : "col-md-3")">
                     <label class="form-label">Placeholder</label>
                     <input class="form-control" @bind="field.Placeholder" placeholder="Optional" />
                 </div>
@@ -82,14 +82,21 @@
                 </div>
             }
 
-            @if (field.Type == DynamicForm.FormFieldType.Select)
+            @* Options for Select and RadioGroup *@
+            @if (field.Type == DynamicForm.FormFieldType.Select || field.Type == DynamicForm.FormFieldType.RadioGroup)
             {
                 <div class="row g-3 mt-2">
                     <div class="col-12">
-                        <label class="form-label">Options</label>
+                        <label class="form-label">
+                            Options 
+                            @if (field.Type == DynamicForm.FormFieldType.RadioGroup)
+                            {
+                                <span class="badge bg-info ms-1">Radio buttons - only one can be selected</span>
+                            }
+                        </label>
                         @if (field.Options.Count == 0)
                         {
-                            <div class="alert alert-warning mb-2">Add at least one option for the select field.</div>
+                            <div class="alert alert-warning mb-2">Add at least one option.</div>
                         }
                         @foreach (var option in field.Options)
                         {
@@ -104,7 +111,7 @@
                 </div>
             }
 
-            @if (field.Type != DynamicForm.FormFieldType.StaticText)
+            @if (field.Type != DynamicForm.FormFieldType.StaticText && field.Type != DynamicForm.FormFieldType.RadioGroup)
             {
                 <div class="row g-3 mt-2">
                     <div class="col-12">
@@ -114,10 +121,11 @@
                 </div>
             }
 
-            @* Price field for Checkbox, Number, Select *@
+            @* Price field for Checkbox, Number, Select, RadioGroup *@
             @if (field.Type == DynamicForm.FormFieldType.Checkbox || 
                  field.Type == DynamicForm.FormFieldType.Number || 
-                 field.Type == DynamicForm.FormFieldType.Select)
+                 field.Type == DynamicForm.FormFieldType.Select ||
+                 field.Type == DynamicForm.FormFieldType.RadioGroup)
             {
                 <div class="row g-3 mt-2">
                     <div class="col-md-3">
@@ -130,6 +138,60 @@
                         </small>
                     </div>
                 </div>
+            }
+
+            @* Parent field selector for nesting *@
+            @{
+                var potentialParents = GetPotentialParents(field);
+            }
+            @if (potentialParents.Any())
+            {
+                <div class="row g-3 mt-2">
+                    <div class="col-md-4">
+                        <label class="form-label">Parent Field (for nesting)</label>
+                        <select class="form-select" @bind="field.ParentFieldKey">
+                            <option value="">-- No parent (root level) --</option>
+                            @foreach (var parent in potentialParents)
+                            {
+                                <option value="@parent.Key">@parent.Key (@parent.Type)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-8 d-flex align-items-end">
+                        <small class="text-muted">
+                            @if (potentialParents.Any(p => p.Type == DynamicForm.FormFieldType.StaticText))
+                            {
+                                <span>Checkbox parent: children show when checked. StaticText parent: children always visible (grouped).</span>
+                            }
+                            else
+                            {
+                                <span>If set, this field will only show when the parent checkbox is checked.</span>
+                            }
+                        </small>
+                    </div>
+                </div>
+            }
+
+            @* Mutually exclusive fields - only for Checkbox type *@
+            @if (field.Type == DynamicForm.FormFieldType.Checkbox)
+            {
+                var otherCheckboxes = GetOtherCheckboxes(field);
+                @if (otherCheckboxes.Any())
+                {
+                    <div class="row g-3 mt-2">
+                        <div class="col-md-4">
+                            <label class="form-label">Mutually Exclusive With</label>
+                            <input type="text" class="form-control" @bind="field.MutuallyExclusiveWith" 
+                                   placeholder="e.g., unableToAttend" />
+                        </div>
+                        <div class="col-md-8 d-flex align-items-end">
+                            <small class="text-muted">
+                                Comma-separated field keys. When this checkbox is checked, those fields will be unchecked.
+                                <br/>Available: @string.Join(", ", otherCheckboxes.Select(c => c.Key))
+                            </small>
+                        </div>
+                    </div>
+                }
             }
         </div>
     </div>
@@ -161,11 +223,14 @@
     private bool CanSave => !string.IsNullOrWhiteSpace(FormName) && 
                            EditingFields.Count > 0 && 
                            EditingFields.All(f => !string.IsNullOrWhiteSpace(f.Key) &&
-                                                 // For Checkbox, require CheckboxLabel; for others, require Label
+                                                 // For Checkbox, require CheckboxLabel; for RadioGroup, require options; for others, require Label
                                                  (f.Type == DynamicForm.FormFieldType.Checkbox 
                                                      ? !string.IsNullOrWhiteSpace(f.CheckboxLabel) 
-                                                     : !string.IsNullOrWhiteSpace(f.Label)) &&
-                                                 (f.Type != DynamicForm.FormFieldType.Select || f.Options.Count > 0));
+                                                     : f.Type == DynamicForm.FormFieldType.RadioGroup
+                                                         ? f.Options.Count > 0
+                                                         : !string.IsNullOrWhiteSpace(f.Label)) &&
+                                                 // Select and RadioGroup need at least one option
+                                                 ((f.Type != DynamicForm.FormFieldType.Select && f.Type != DynamicForm.FormFieldType.RadioGroup) || f.Options.Count > 0));
 
     private void AddField()
     {
@@ -186,15 +251,19 @@
 
     private void OnFieldTypeChanged(FormFieldDefinition field)
     {
-        // Clear options if switching away from Select
-        if (field.Type != DynamicForm.FormFieldType.Select)
+        // Clear options if switching away from Select or RadioGroup
+        if (field.Type != DynamicForm.FormFieldType.Select && field.Type != DynamicForm.FormFieldType.RadioGroup)
         {
             field.Options.Clear();
         }
-        // Add one option if switching to Select and has none
+        // Add options if switching to Select or RadioGroup and has none
         else if (field.Options.Count == 0)
         {
             AddOption(field);
+            if (field.Type == DynamicForm.FormFieldType.RadioGroup)
+            {
+                AddOption(field); // Add second option for RadioGroup
+            }
         }
     }
 
@@ -212,13 +281,40 @@
         field.Options.Remove(option);
     }
 
+    /// <summary>
+    /// Get list of fields that can be parents for the given field.
+    /// Checkboxes and StaticText that come BEFORE this field can be parents.
+    /// </summary>
+    private List<FormFieldDefinition> GetPotentialParents(FormFieldDefinition field)
+    {
+        var fieldIndex = EditingFields.IndexOf(field);
+        if (fieldIndex <= 0) return new List<FormFieldDefinition>();
+
+        // Get all checkbox and StaticText fields that come before this field
+        return EditingFields
+            .Take(fieldIndex)
+            .Where(f => (f.Type == DynamicForm.FormFieldType.Checkbox || f.Type == DynamicForm.FormFieldType.StaticText) 
+                        && !string.IsNullOrWhiteSpace(f.Key))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Get list of other checkbox fields (for mutually exclusive selection).
+    /// </summary>
+    private List<FormFieldDefinition> GetOtherCheckboxes(FormFieldDefinition field)
+    {
+        return EditingFields
+            .Where(f => f != field && f.Type == DynamicForm.FormFieldType.Checkbox && !string.IsNullOrWhiteSpace(f.Key))
+            .ToList();
+    }
+
     private async Task SaveForm()
     {
         if (!CanSave)
         {
             if (ToastRef is not null)
             {
-                await ToastRef.ShowAsync("Please fill in all required fields (Form Name, Keys, Labels, and Checkbox Labels). Select fields must have at least one option.", "danger", 4000);
+                await ToastRef.ShowAsync("Please fill in all required fields (Form Name, Keys, Labels, and Checkbox Labels). Select and RadioGroup fields must have at least one option.", "danger", 4000);
             }
             return;
         }
@@ -233,14 +329,19 @@
                 {
                     Key = f.Key.Trim(),
                     // For Checkbox, use CheckboxLabel as Label since Label field is hidden
+                    // For RadioGroup, use Key as label since it doesn't have a visible label
                     Label = f.Type == DynamicForm.FormFieldType.Checkbox 
                         ? (f.CheckboxLabel?.Trim() ?? string.Empty) 
-                        : f.Label.Trim(),
+                        : f.Type == DynamicForm.FormFieldType.RadioGroup
+                            ? f.Key.Trim()
+                            : f.Label.Trim(),
                     Type = f.Type,
                     Placeholder = f.Placeholder?.Trim(),
                     CheckboxLabel = f.CheckboxLabel?.Trim(),
                     HelpText = f.HelpText?.Trim(),
                     Price = f.Price,
+                    ParentFieldKey = string.IsNullOrWhiteSpace(f.ParentFieldKey) ? null : f.ParentFieldKey.Trim(),
+                    MutuallyExclusiveWith = string.IsNullOrWhiteSpace(f.MutuallyExclusiveWith) ? null : f.MutuallyExclusiveWith.Trim(),
                     Options = f.Options.Select(o => new FormFieldOptionDefinition
                     {
                         Value = o.Value.Trim(),

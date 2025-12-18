@@ -124,6 +124,8 @@ else
                         HelpText = f.HelpText,
                         DefaultValue = ParseDefaultValue(f.DefaultValueJson),
                         Price = f.Price,
+                        ParentFieldKey = f.ParentFieldKey,
+                        MutuallyExclusiveWith = ParseMutuallyExclusiveWith(f.MutuallyExclusiveWith),
                         Options = f.Options.Select(o => new DynamicForm.FormFieldOption
                         {
                             Value = o.Value,
@@ -158,6 +160,19 @@ else
         {
             return defaultValueJson;
         }
+    }
+
+    private List<string>? ParseMutuallyExclusiveWith(string? mutuallyExclusiveWith)
+    {
+        if (string.IsNullOrWhiteSpace(mutuallyExclusiveWith))
+            return null;
+
+        // Parse comma-separated list of field keys
+        return mutuallyExclusiveWith
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .ToList();
     }
 
     private async Task HandleSubmit(Dictionary<string, object?> values)
