@@ -8,6 +8,8 @@
 
 <PageTitle>Form Designer</PageTitle>
 
+<Toast @ref="ToastRef" />
+
 <h3>Form Designer</h3>
 <p>Create a dynamic form by adding fields below.</p>
 
@@ -41,11 +43,14 @@
                     <label class="form-label">Key <span class="text-danger">*</span></label>
                     <input class="form-control" @bind="field.Key" placeholder="fieldKey" />
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text" : "Label") <span class="text-danger">*</span></label>
-                    <input class="form-control" @bind="field.Label" placeholder="@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text to display (no input field)" : "Field Label")" />
-                </div>
-                <div class="col-md-2">
+                @if (field.Type != DynamicForm.FormFieldType.Checkbox)
+                {
+                    <div class="col-md-3">
+                        <label class="form-label">@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text" : "Label") <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="field.Label" placeholder="@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text to display (no input field)" : "Field Label")" />
+                    </div>
+                }
+                <div class="@(field.Type == DynamicForm.FormFieldType.Checkbox ? "col-md-2" : "col-md-2")">
                     <label class="form-label">Type <span class="text-danger">*</span></label>
                     <select class="form-select"
                             @bind="field.Type"
@@ -56,7 +61,7 @@
                         }
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="@(field.Type == DynamicForm.FormFieldType.Checkbox ? "col-md-6" : "col-md-3")">
                     <label class="form-label">Placeholder</label>
                     <input class="form-control" @bind="field.Placeholder" placeholder="Optional" />
                 </div>
@@ -71,7 +76,7 @@
             {
                 <div class="row g-3 mt-2">
                     <div class="col-md-6">
-                        <label class="form-label">Checkbox Label</label>
+                        <label class="form-label">Checkbox Label <span class="text-danger">*</span></label>
                         <input class="form-control" @bind="field.CheckboxLabel" placeholder="Label next to checkbox" />
                     </div>
                 </div>
@@ -124,27 +129,24 @@
     </button>
 </div>
 
-@if (SaveMessage is not null)
-{
-    <div class="alert @(SaveMessage.Contains("error") || SaveMessage.Contains("Error") ? "alert-danger" : "alert-success") mt-3">
-        @SaveMessage
-    </div>
-}
-
 @code {
+    private Toast? ToastRef;
+
     private string FormName { get; set; } = string.Empty;
     private string? FormDescription { get; set; }
 
     private List<FormFieldDefinition> EditingFields { get; set; } = new();
-
-    private string? SaveMessage { get; set; }
 
     private DynamicForm.FormFieldType[] FieldTypes =
         (DynamicForm.FormFieldType[])Enum.GetValues(typeof(DynamicForm.FormFieldType));
 
     private bool CanSave => !string.IsNullOrWhiteSpace(FormName) && 
                            EditingFields.Count > 0 && 
-                           EditingFields.All(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Label) &&
+                           EditingFields.All(f => !string.IsNullOrWhiteSpace(f.Key) &&
+                                                 // For Checkbox, require CheckboxLabel; for others, require Label
+                                                 (f.Type == DynamicForm.FormFieldType.Checkbox 
+                                                     ? !string.IsNullOrWhiteSpace(f.CheckboxLabel) 
+                                                     : !string.IsNullOrWhiteSpace(f.Label)) &&
                                                  (f.Type != DynamicForm.FormFieldType.Select || f.Options.Count > 0));
 
     private void AddField()
@@ -157,14 +159,11 @@
         });
 
         Console.WriteLine("New field count after AddField: " + EditingFields.Count);
-
-        SaveMessage = null;
     }
 
     private void RemoveField(FormFieldDefinition field)
     {
         EditingFields.Remove(field);
-        SaveMessage = null;
     }
 
     private void OnFieldTypeChanged(FormFieldDefinition field)
@@ -199,7 +198,10 @@
     {
         if (!CanSave)
         {
-            SaveMessage = "Error: Please fill in all required fields (Form Name, and all field Keys/Labels). Select fields must have at least one option.";
+            if (ToastRef is not null)
+            {
+                await ToastRef.ShowAsync("Please fill in all required fields (Form Name, Keys, Labels, and Checkbox Labels). Select fields must have at least one option.", "danger", 4000);
+            }
             return;
         }
 
@@ -212,7 +214,10 @@
                 Fields = EditingFields.Select(f => new FormFieldDefinition
                 {
                     Key = f.Key.Trim(),
-                    Label = f.Label.Trim(),
+                    // For Checkbox, use CheckboxLabel as Label since Label field is hidden
+                    Label = f.Type == DynamicForm.FormFieldType.Checkbox 
+                        ? (f.CheckboxLabel?.Trim() ?? string.Empty) 
+                        : f.Label.Trim(),
                     Type = f.Type,
                     Placeholder = f.Placeholder?.Trim(),
                     CheckboxLabel = f.CheckboxLabel?.Trim(),
@@ -228,15 +233,21 @@
             Db.FormDefinitions.Add(form);
             await Db.SaveChangesAsync();
 
-            SaveMessage = $"✅ Form saved successfully! Form ID: {form.Id}";
+            if (ToastRef is not null)
+            {
+                await ToastRef.ShowAsync($"Form saved successfully! Form ID: {form.Id}", "success");
+            }
             
-            // Optionally navigate to view the form
+            // Navigate to view the form after a short delay
             await Task.Delay(1500);
             Navigation.NavigateTo($"/fill-form/{form.Id}");
         }
         catch (Exception ex)
         {
-            SaveMessage = $"Error saving form: {ex.Message}";
+            if (ToastRef is not null)
+            {
+                await ToastRef.ShowAsync($"Error saving form: {ex.Message}", "danger", 4000);
+            }
         }
     }
 
@@ -245,4 +256,3 @@
         Navigation.NavigateTo("/");
     }
 }
-

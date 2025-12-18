@@ -1,0 +1,52 @@
+@if (IsVisible && Message is not null)
+{
+    <div class="position-fixed top-0 end-0 p-3" style="z-index: 1080;">
+        <div class="@($"toast show text-bg-{CssClass} border-0 shadow")" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body">
+                    @Message
+                </div>
+                <button type="button"
+                        class="btn-close btn-close-white me-2 m-auto"
+                        aria-label="Close"
+                        @onclick="Hide">
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool IsVisible;
+    private string? Message;
+    private string CssClass = "success";
+
+    /// <summary>
+    /// Shows a toast message that auto-hides after the specified duration.
+    /// </summary>
+    /// <param name="message">The message to display</param>
+    /// <param name="type">Bootstrap color type: success, danger, warning, info, primary, secondary</param>
+    /// <param name="durationMs">Auto-hide duration in milliseconds (default 3000)</param>
+    public async Task ShowAsync(string message, string type = "success", int durationMs = 3000)
+    {
+        Message = message;
+        CssClass = type;
+        IsVisible = true;
+        await InvokeAsync(StateHasChanged);
+
+        // Auto-hide after specified delay
+        await Task.Delay(durationMs);
+        IsVisible = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Manually hide the toast.
+    /// </summary>
+    public void Hide()
+    {
+        IsVisible = false;
+        StateHasChanged();
+    }
+}
+

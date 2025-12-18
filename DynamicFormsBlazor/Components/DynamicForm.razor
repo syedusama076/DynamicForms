@@ -6,7 +6,10 @@
             @foreach (var field in Fields)
             {
                 <div class="mb-3">
-                    <label class="form-label">@field.Label</label>
+                    @if (field.Type != FormFieldType.Checkbox)
+                    {
+                        <label class="form-label">@field.Label</label>
+                    }
 
                     @switch (field.Type)
                     {
