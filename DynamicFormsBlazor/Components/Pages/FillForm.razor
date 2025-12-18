@@ -1,5 +1,6 @@
 @page "/fill-form"
 @page "/fill-form/{FormId:int?}"
+@rendermode InteractiveServer
 @using DynamicFormsBlazor.Data
 @using DynamicFormsBlazor.Models
 @using DynamicFormsBlazor.Components
@@ -8,6 +9,24 @@
 @inject NavigationManager Navigation
 
 <PageTitle>Fill Form</PageTitle>
+
+@if (ShowToast && ToastMessage is not null)
+{
+    <div class="position-fixed top-0 end-0 p-3" style="z-index: 1080;">
+        <div class="@($"toast show text-bg-{ToastCssClass} border-0 shadow")" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body">
+                    @ToastMessage
+                </div>
+                <button type="button"
+                        class="btn-close btn-close-white me-2 m-auto"
+                        aria-label="Close"
+                        @onclick="HideToast">
+                </button>
+            </div>
+        </div>
+    </div>
+}
 
 @if (IsLoading)
 {
@@ -58,18 +77,22 @@ else if (FormDefinition is null)
 }
 else
 {
-    <div class="mb-3">
-        <h3>@FormDefinition.Name</h3>
+    <div class="mb-4 text-center">
+        <h2 class="mb-2">@FormDefinition.Name</h2>
         @if (!string.IsNullOrWhiteSpace(FormDefinition.Description))
         {
-            <p class="text-muted">@FormDefinition.Description</p>
+            <p class="text-muted mb-1">@FormDefinition.Description</p>
         }
     </div>
 
-    <DynamicForm Fields="Fields"
-                 Values="Values"
-                 SubmitText="Submit"
-                 OnSubmit="HandleSubmit" />
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-md-10">
+            <DynamicForm Fields="Fields"
+                         Values="Values"
+                         SubmitText="Submit"
+                         OnSubmit="HandleSubmit" />
+        </div>
+    </div>
 
     @if (LastSubmittedJson is not null)
     {
@@ -95,6 +118,11 @@ else
     private List<DynamicForm.FormField>? Fields;
     private Dictionary<string, object?> Values = new();
     private string? LastSubmittedJson;
+
+    private bool ShowToast;
+    private string? ToastMessage;
+    private string ToastCssClass = "success";
+
     private bool IsLoading = true;
 
     protected override async Task OnInitializedAsync()
@@ -161,21 +189,60 @@ else
         }
     }
 
-    private void HandleSubmit(Dictionary<string, object?> values)
+    private async Task HandleSubmit(Dictionary<string, object?> values)
     {
         LastSubmittedJson = System.Text.Json.JsonSerializer.Serialize(
             values,
             new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        
-        // Here you could also save the submitted form data to another table if needed
-        // For example: Db.FormSubmissions.Add(new FormSubmission { FormId = FormId, Data = values });
-        // await Db.SaveChangesAsync();
+        if (FormId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var rawJson = System.Text.Json.JsonSerializer.Serialize(values);
+
+            var submission = new FormSubmission
+            {
+                FormDefinitionId = FormId.Value,
+                DataJson = rawJson
+            };
+
+            Db.FormSubmissions.Add(submission);
+            await Db.SaveChangesAsync();
+
+            await ShowToastMessage("Form submitted successfully.", "success");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error saving form submission: {ex.Message}");
+            await ShowToastMessage("Error saving form submission. Please try again.", "danger");
+        }
     }
 
     private void ResetForm()
     {
         LastSubmittedJson = null;
         Values = new Dictionary<string, object?>();
+    }
+
+    private async Task ShowToastMessage(string message, string type)
+    {
+        ToastMessage = message;
+        ToastCssClass = type;
+        ShowToast = true;
+        await InvokeAsync(StateHasChanged);
+
+        // Auto-hide after a short delay
+        await Task.Delay(3000);
+        ShowToast = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void HideToast()
+    {
+        ShowToast = false;
     }
 }
 

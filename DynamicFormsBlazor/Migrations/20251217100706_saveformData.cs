@@ -1,11 +1,12 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace DynamicFormsBlazor.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class saveformData : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -51,6 +52,27 @@ namespace DynamicFormsBlazor.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "FormSubmissions",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    FormDefinitionId = table.Column<int>(type: "int", nullable: false),
+                    SubmittedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    DataJson = table.Column<string>(type: "nvarchar(max)", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_FormSubmissions", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_FormSubmissions_FormDefinitions_FormDefinitionId",
+                        column: x => x.FormDefinitionId,
+                        principalTable: "FormDefinitions",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "FormFieldOptionDefinitions",
                 columns: table => new
                 {
@@ -80,6 +102,11 @@ namespace DynamicFormsBlazor.Migrations
                 name: "IX_FormFieldOptionDefinitions_FormFieldDefinitionId",
                 table: "FormFieldOptionDefinitions",
                 column: "FormFieldDefinitionId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FormSubmissions_FormDefinitionId",
+                table: "FormSubmissions",
+                column: "FormDefinitionId");
         }
 
         /// <inheritdoc />
@@ -87,6 +114,9 @@ namespace DynamicFormsBlazor.Migrations
         {
             migrationBuilder.DropTable(
                 name: "FormFieldOptionDefinitions");
+
+            migrationBuilder.DropTable(
+                name: "FormSubmissions");
 
             migrationBuilder.DropTable(
                 name: "FormFieldDefinitions");

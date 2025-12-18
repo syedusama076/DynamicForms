@@ -61,6 +61,10 @@
                                 }
                             </select>
                             break;
+
+                        case FormFieldType.StaticText:
+                            <p class="mb-0">@field.Label</p>
+                            break;
                     }
 
                     @if (!string.IsNullOrWhiteSpace(field.HelpText))
@@ -99,7 +103,7 @@
         // Ensure all fields have an entry in the values dictionary
         foreach (var field in Fields)
         {
-            if (!Values.ContainsKey(field.Key))
+            if (field.Type != FormFieldType.StaticText && !Values.ContainsKey(field.Key))
             {
                 Values[field.Key] = field.DefaultValue;
             }
@@ -150,7 +154,8 @@
         Number,
         Date,
         Checkbox,
-        Select
+        Select,
+        StaticText
     }
 
     public class FormField

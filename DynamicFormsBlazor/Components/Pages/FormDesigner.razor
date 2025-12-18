@@ -42,8 +42,8 @@
                     <input class="form-control" @bind="field.Key" placeholder="fieldKey" />
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Label <span class="text-danger">*</span></label>
-                    <input class="form-control" @bind="field.Label" placeholder="Field Label" />
+                    <label class="form-label">@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text" : "Label") <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="field.Label" placeholder="@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text to display (no input field)" : "Field Label")" />
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Type <span class="text-danger">*</span></label>
@@ -99,12 +99,15 @@
                 </div>
             }
 
-            <div class="row g-3 mt-2">
-                <div class="col-12">
-                    <label class="form-label">Help Text</label>
-                    <input class="form-control" @bind="field.HelpText" placeholder="Optional help text shown below the field" />
+            @if (field.Type != DynamicForm.FormFieldType.StaticText)
+            {
+                <div class="row g-3 mt-2">
+                    <div class="col-12">
+                        <label class="form-label">Help Text</label>
+                        <input class="form-control" @bind="field.HelpText" placeholder="Optional help text shown below the field" />
+                    </div>
                 </div>
-            </div>
+            }
         </div>
     </div>
 }
@@ -146,8 +149,6 @@
 
     private void AddField()
     {
-        Console.WriteLine("AddField clicked. Current field count: " + EditingFields.Count);
-
         EditingFields.Add(new FormFieldDefinition
         {
             Key = $"field{EditingFields.Count + 1}",

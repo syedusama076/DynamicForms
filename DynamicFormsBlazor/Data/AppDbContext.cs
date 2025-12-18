@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<FormDefinition> FormDefinitions => Set<FormDefinition>();
     public DbSet<FormFieldDefinition> FormFieldDefinitions => Set<FormFieldDefinition>();
     public DbSet<FormFieldOptionDefinition> FormFieldOptionDefinitions => Set<FormFieldOptionDefinition>();
+    public DbSet<FormSubmission> FormSubmissions => Set<FormSubmission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
