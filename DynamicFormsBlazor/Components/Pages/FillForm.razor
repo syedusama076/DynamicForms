@@ -1,5 +1,5 @@
 @page "/fill-form"
-@page "/fill-form/{FormId:int?}"
+@page "/fill-form/{FormName?}"
 @rendermode InteractiveServer
 @using DynamicFormsBlazor.Data
 @using DynamicFormsBlazor.Models
@@ -21,7 +21,7 @@
         <p class="mt-2">Loading...</p>
     </div>
 }
-else if (FormId is null)
+else if (FormName is null)
 {
     <h3>Forms</h3>
 
@@ -36,17 +36,25 @@ else if (FormId is null)
         <div class="list-group">
             @foreach (var form in AllForms)
             {
-                <a class="list-group-item list-group-item-action"
-                   href="@($"/fill-form/{form.Id}")">
-                    <div class="d-flex w-100 justify-content-between">
-                        <h5 class="mb-1">@form.Name</h5>
-                        <small class="text-muted">ID: @form.Id</small>
+                <div class="list-group-item">
+                    <div class="d-flex w-100 justify-content-between align-items-start">
+                        <div class="flex-grow-1">
+                            <a class="text-decoration-none" href="@($"/fill-form/{form.Name.Replace(" ", "")}")">
+                                <h5 class="mb-1">@form.Name</h5>
+                            </a>
+                            @if (!string.IsNullOrWhiteSpace(form.Description))
+                            {
+                                <p class="mb-1 text-muted">@form.Description</p>
+                            }
+                            <small class="text-muted">ID: @form.Id</small>
+                        </div>
+                        <div class="ms-3">
+                            <a class="btn btn-sm btn-outline-primary" href="@($"/form-designer/{form.Name.Replace(" ", "")}")" title="Edit Form">
+                                ✏️ Edit
+                            </a>
+                        </div>
                     </div>
-                    @if (!string.IsNullOrWhiteSpace(form.Description))
-                    {
-                        <p class="mb-1 text-muted">@form.Description</p>
-                    }
-                </a>
+                </div>
             }
         </div>
     }
@@ -55,14 +63,20 @@ else if (FormDefinition is null)
 {
     <div class="alert alert-warning">
         <h4>Form Not Found</h4>
-        <p>The form with ID @FormId could not be found.</p>
+        <p>The form "@FormName" could not be found.</p>
         <button class="btn btn-primary" @onclick="@(() => Navigation.NavigateTo("/fill-form"))">Back to Forms</button>
     </div>
 }
 else
 {
     <div class="mb-4 text-center">
-        <h2 class="mb-2">@FormDefinition.Name</h2>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div></div>
+            <h2 class="mb-0">@FormDefinition.Name</h2>
+            <a class="btn btn-sm btn-outline-primary" href="@($"/form-designer/{FormDefinition.Name.Replace(" ", "")}")" title="Edit Form">
+                ✏️ Edit
+            </a>
+        </div>
         @if (!string.IsNullOrWhiteSpace(FormDefinition.Description))
         {
             <p class="text-muted mb-1">@FormDefinition.Description</p>
@@ -82,7 +96,7 @@ else
 }
 
 @code {
-    [Parameter] public int? FormId { get; set; }
+    [Parameter] public string? FormName { get; set; }
 
     private Toast? ToastRef;
     private DynamicForm? DynamicFormRef;
@@ -104,33 +118,41 @@ else
                 .OrderBy(f => f.Name)
                 .ToListAsync();
 
-            // If a specific form ID is requested, load that form
-            if (FormId is not null)
+            // If a specific form name is requested, load that form
+            if (FormName is not null)
             {
+                // FormName in URL has spaces removed, so we need to compare with normalized names
                 FormDefinition = await Db.FormDefinitions
                     .Include(f => f.Fields)
                     .ThenInclude(f => f.Options)
-                    .FirstOrDefaultAsync(f => f.Id == FormId.Value);
+                    .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == FormName);
 
                 if (FormDefinition is not null)
                 {
-                    Fields = FormDefinition.Fields.Select(f => new DynamicForm.FormField
+                    Fields = FormDefinition.Fields.Select(f => 
                     {
-                        Key = f.Key,
-                        Label = f.Label,
-                        Type = f.Type,
-                        Placeholder = f.Placeholder,
-                        CheckboxLabel = f.CheckboxLabel,
-                        HelpText = f.HelpText,
-                        DefaultValue = ParseDefaultValue(f.DefaultValueJson),
-                        Price = f.Price,
-                        ParentFieldKey = f.ParentFieldKey,
-                        MutuallyExclusiveWith = ParseMutuallyExclusiveWith(f.MutuallyExclusiveWith),
-                        Options = f.Options.Select(o => new DynamicForm.FormFieldOption
+                        // Load option prices from DefaultValueJson (stored as JSON dictionary)
+                        var optionPrices = ParseOptionPrices(f.DefaultValueJson);
+                        
+                        return new DynamicForm.FormField
                         {
-                            Value = o.Value,
-                            Text = o.Text
-                        }).ToList()
+                            Key = f.Key,
+                            Label = f.Label,
+                            Type = f.Type,
+                            Placeholder = f.Placeholder,
+                            CheckboxLabel = f.CheckboxLabel,
+                            HelpText = f.HelpText,
+                            DefaultValue = ParseDefaultValue(f.DefaultValueJson),
+                            Price = f.Price,
+                            ParentFieldKey = f.ParentFieldKey,
+                            MutuallyExclusiveWith = ParseMutuallyExclusiveWith(f.MutuallyExclusiveWith),
+                            Options = f.Options.Select(o => new DynamicForm.FormFieldOption
+                            {
+                                Value = o.Value,
+                                Text = o.Text,
+                                Price = optionPrices.TryGetValue(o.Value, out var price) ? price : (decimal?)null
+                            }).ToList()
+                        };
                     }).ToList();
                 }
             }
@@ -153,13 +175,84 @@ else
 
         try
         {
-            // Try to parse as JSON, fallback to string
+            // Try to parse as OptionPricingConfig first (new format)
+            var config = System.Text.Json.JsonSerializer.Deserialize<OptionPricingConfig>(defaultValueJson);
+            if (config != null)
+            {
+                // This is option pricing config, not a default value
+                return null;
+            }
+        }
+        catch
+        {
+            // If that fails, try old format (just dictionary of prices)
+            try
+            {
+                var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, decimal>>(defaultValueJson);
+                if (dict != null && dict.Count > 0)
+                {
+                    // This is option prices, not a default value
+                    return null;
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
+        }
+
+        try
+        {
             return System.Text.Json.JsonSerializer.Deserialize<object>(defaultValueJson);
         }
         catch
         {
             return defaultValueJson;
         }
+    }
+
+    private Dictionary<string, decimal> ParseOptionPrices(string? defaultValueJson)
+    {
+        if (string.IsNullOrWhiteSpace(defaultValueJson))
+            return new Dictionary<string, decimal>();
+
+        try
+        {
+            // Try new format first (OptionPricingConfig)
+            var config = System.Text.Json.JsonSerializer.Deserialize<OptionPricingConfig>(defaultValueJson);
+            if (config != null)
+            {
+                // Only return prices if per-option pricing is enabled
+                if (config.UsePerOptionPricing && config.OptionPrices != null)
+                {
+                    return config.OptionPrices;
+                }
+                // If UsePerOptionPricing is false, return empty (don't use option prices)
+                return new Dictionary<string, decimal>();
+            }
+        }
+        catch
+        {
+            // If deserialization as OptionPricingConfig fails, try old format (just dictionary)
+            try
+            {
+                var prices = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, decimal>>(defaultValueJson);
+                return prices ?? new Dictionary<string, decimal>();
+            }
+            catch
+            {
+                return new Dictionary<string, decimal>();
+            }
+        }
+
+        return new Dictionary<string, decimal>();
+    }
+
+    // Helper class for option pricing configuration
+    private class OptionPricingConfig
+    {
+        public bool UsePerOptionPricing { get; set; }
+        public Dictionary<string, decimal> OptionPrices { get; set; } = new();
     }
 
     private List<string>? ParseMutuallyExclusiveWith(string? mutuallyExclusiveWith)
@@ -180,7 +273,7 @@ else
         LastSubmittedJson = System.Text.Json.JsonSerializer.Serialize(
             values,
             new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-        if (FormId is null)
+        if (FormName is null || FormDefinition is null)
         {
             return;
         }
@@ -194,7 +287,7 @@ else
 
             var submission = new FormSubmission
             {
-                FormDefinitionId = FormId.Value,
+                FormDefinitionId = FormDefinition.Id,
                 DataJson = rawJson,
                 TotalAmount = totalAmount
             };

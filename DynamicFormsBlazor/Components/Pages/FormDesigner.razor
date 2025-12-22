@@ -1,8 +1,10 @@
 @page "/form-designer"
+@page "/form-designer/{FormName?}"
 @rendermode InteractiveServer
 @using DynamicFormsBlazor.Data
 @using DynamicFormsBlazor.Models
 @using DynamicFormsBlazor.Components
+@using Microsoft.EntityFrameworkCore
 @inject AppDbContext Db
 @inject NavigationManager Navigation
 
@@ -11,13 +13,13 @@
 <Toast @ref="ToastRef" />
 
 <h3>Form Designer</h3>
-<p>Create a dynamic form by adding fields below.</p>
+<p>@(IsEditing ? "Edit your form by modifying fields below." : "Create a dynamic form by adding fields below.")</p>
 
 <div class="card mb-3">
     <div class="card-body">
         <div class="mb-3">
             <label class="form-label">Form Name <span class="text-danger">*</span></label>
-            <input class="form-control" @bind="FormName" placeholder="e.g., Contact Form" />
+            <input class="form-control" @bind="FormNameInput" placeholder="e.g., Contact Form" />
         </div>
 
         <div class="mb-3">
@@ -87,6 +89,28 @@
             {
                 <div class="row g-3 mt-2">
                     <div class="col-12">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="@($"perOptionPricing_{field.Key}")"
+                                   checked="@IsPerOptionPricingEnabled(field)"
+                                   @onchange="@((ChangeEventArgs e) => { 
+                                       var enabled = e.Value?.ToString() == "True" || (e.Value is bool b && b); 
+                                       TogglePerOptionPricing(field, enabled); 
+                                   })" />
+                            <label class="form-check-label" for="@($"perOptionPricing_{field.Key}")">
+                                Enable per-option pricing
+                                <small class="text-muted ms-1">(Set different prices for each option)</small>
+                            </label>
+                        </div>
+                        @if (IsPerOptionPricingEnabled(field))
+                        {
+                            <div class="alert alert-info mb-2">
+                                <small>
+                                    <strong>Tip:</strong> Use <code>{price}</code> in option text to display the price. 
+                                    Example: "Option Name - {price}" will show as "Option Name - $10.00"
+                                </small>
+                            </div>
+                        }
                         <label class="form-label">
                             Options 
                             @if (field.Type == DynamicForm.FormFieldType.RadioGroup)
@@ -100,13 +124,118 @@
                         }
                         @foreach (var option in field.Options)
                         {
+                            var optionPrice = GetOptionPrice(field, option.Value);
+                            var showPriceInput = IsPerOptionPricingEnabled(field);
                             <div class="input-group mb-2">
-                                <input type="text" class="form-control" @bind="option.Value" placeholder="Value" />
+                                <input type="text" class="form-control" @bind="option.Value" 
+                                       @bind:after="() => OnOptionValueChanged(field, option, optionPrice)"
+                                       placeholder="Value" />
                                 <input type="text" class="form-control" @bind="option.Text" placeholder="Display Text" />
+                                @if (showPriceInput)
+                                {
+                                    <span class="input-group-text">Price ($)</span>
+                                    <input type="number" class="form-control" style="max-width: 120px;" 
+                                           @bind="optionPrice" 
+                                           @bind:after="() => SetOptionPrice(field, option.Value, optionPrice)"
+                                           placeholder="0.00" step="0.01" min="0" />
+                                }
                                 <button class="btn btn-outline-danger" type="button" @onclick="@(() => RemoveOption(field, option))">Remove</button>
                             </div>
                         }
                         <button class="btn btn-sm btn-secondary" @onclick="@(() => AddOption(field))">+ Add Option</button>
+                    </div>
+                </div>
+            }
+
+            @* Columns for Table *@
+            @if (field.Type == DynamicForm.FormFieldType.Table)
+            {
+                <div class="row g-3 mt-2">
+                    <div class="col-12">
+                        <label class="form-label">
+                            Table Columns 
+                            <span class="badge bg-info ms-1">Each column represents a field in the table</span>
+                        </label>
+                        @if (field.Options.Count == 0)
+                        {
+                            <div class="alert alert-warning mb-2">Add at least one column to define the table structure.</div>
+                        }
+                        @foreach (var column in field.Options)
+                        {
+                            var columnConfig = ParseTableColumnConfig(column.Value);
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3">
+                                            <label class="form-label">Column Key <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" @bind="columnConfig.Key" 
+                                                   @bind:after="() => UpdateTableColumnConfig(column, columnConfig)"
+                                                   placeholder="e.g., itemDescription" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Column Label <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" @bind="column.Text" 
+                                                   placeholder="e.g., Item Description" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">Input Type <span class="text-danger">*</span></label>
+                                            <select class="form-select" @bind="columnConfig.Type" 
+                                                    @bind:after="() => OnTableColumnTypeChanged(column, columnConfig)">
+                                                <option value="Text">Text</option>
+                                                <option value="Number">Number</option>
+                                                <option value="Checkbox">Checkbox</option>
+                                                <option value="Select">Dropdown (Select)</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3 d-flex align-items-end">
+                                            <button class="btn btn-outline-danger w-100" type="button" @onclick="@(() => RemoveOption(field, column))">Remove Column</button>
+                                        </div>
+                                    </div>
+                                    @if (columnConfig.Type == "Select")
+                                    {
+                                        <div class="row g-3 mt-2">
+                                            <div class="col-12">
+                                                <label class="form-label">
+                                                    Dropdown Options 
+                                                </label>
+                                                @if (columnConfig.Options == null || columnConfig.Options.Count == 0)
+                                                {
+                                                    <div class="alert alert-warning mb-2">Add at least one option.</div>
+                                                }
+                                                @if (columnConfig.Options != null)
+                                                {
+                                                    @foreach (var option in columnConfig.Options)
+                                                    {
+                                                        <div class="input-group mb-2">
+                                                            <input type="text" class="form-control" @bind="option.Value" 
+                                                                   @bind:after="() => UpdateTableColumnConfig(column, columnConfig)"
+                                                                   placeholder="Value" />
+                                                            <input type="text" class="form-control" @bind="option.Text" 
+                                                                   @bind:after="() => UpdateTableColumnConfig(column, columnConfig)"
+                                                                   placeholder="Display Text" />
+                                                            <span class="input-group-text">Price ($)</span>
+                                                            <input type="number" class="form-control" style="max-width: 120px;" 
+                                                                   @bind="option.Price" 
+                                                                   @bind:after="() => UpdateTableColumnConfig(column, columnConfig)"
+                                                                   placeholder="0.00" step="0.01" min="0" />
+                                                            <button class="btn btn-outline-danger" type="button" 
+                                                                    @onclick="@(() => RemoveTableColumnOption(column, columnConfig, option))">
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                    }
+                                                }
+                                                <button class="btn btn-sm btn-secondary" 
+                                                        @onclick="@(() => AddTableColumnOption(column, columnConfig))">
+                                                    + Add Option
+                                                </button>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-secondary" @onclick="@(() => AddOption(field))">+ Add Column</button>
                     </div>
                 </div>
             }
@@ -202,7 +331,7 @@
         <span aria-hidden="true">+</span> Add Field
     </button>
     <button class="btn btn-primary" @onclick="SaveForm" >
-        💾 Save Form
+        💾 @(IsEditing ? "Update Form" : "Save Form")
     </button>
     <button class="btn btn-outline-secondary ms-2" @onclick="Cancel">
         Cancel
@@ -210,17 +339,83 @@
 </div>
 
 @code {
+    [Parameter] public string? FormName { get; set; }
+
     private Toast? ToastRef;
 
-    private string FormName { get; set; } = string.Empty;
+    private string FormNameInput { get; set; } = string.Empty;
     private string? FormDescription { get; set; }
 
     private List<FormFieldDefinition> EditingFields { get; set; } = new();
+    private bool IsEditing => !string.IsNullOrWhiteSpace(FormName);
 
     private DynamicForm.FormFieldType[] FieldTypes =
         (DynamicForm.FormFieldType[])Enum.GetValues(typeof(DynamicForm.FormFieldType));
 
-    private bool CanSave => !string.IsNullOrWhiteSpace(FormName) && 
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsEditing && !string.IsNullOrWhiteSpace(FormName))
+        {
+            try
+            {
+                // FormName in URL has spaces removed, so we need to compare with normalized names
+                var existingForm = await Db.FormDefinitions
+                    .Include(f => f.Fields)
+                    .ThenInclude(f => f.Options)
+                    .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == FormName);
+
+                if (existingForm is not null)
+                {
+                    FormNameInput = existingForm.Name;
+                    FormDescription = existingForm.Description;
+
+                    // Load existing fields
+                    EditingFields = existingForm.Fields.Select(f => new FormFieldDefinition
+                    {
+                        Id = f.Id, // Keep the ID for reference
+                        Key = f.Key,
+                        Label = f.Label,
+                        Type = f.Type,
+                        Placeholder = f.Placeholder,
+                        CheckboxLabel = f.CheckboxLabel,
+                        HelpText = f.HelpText,
+                        Price = f.Price,
+                        ParentFieldKey = f.ParentFieldKey,
+                        MutuallyExclusiveWith = f.MutuallyExclusiveWith,
+                        DefaultValueJson = f.DefaultValueJson, // Preserve option prices
+                        Options = f.Options.Select(o => new FormFieldOptionDefinition
+                        {
+                            Id = o.Id,
+                            Value = o.Value,
+                            Text = o.Text
+                        }).ToList()
+                    }).ToList();
+                }
+                else
+                {
+                    // Form not found, redirect to create new
+                    if (ToastRef is not null)
+                    {
+                        await ToastRef.ShowAsync("Form not found. Creating a new form instead.", "warning");
+                    }
+                    Navigation.NavigateTo("/form-designer");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading form for editing: {ex.Message}");
+                if (ToastRef is not null)
+                {
+                    await ToastRef.ShowAsync("Error loading form. Creating a new form instead.", "danger");
+                }
+                Navigation.NavigateTo("/form-designer");
+                return;
+            }
+        }
+    }
+
+    private bool CanSave => !string.IsNullOrWhiteSpace(FormNameInput) && 
                            EditingFields.Count > 0 && 
                            EditingFields.All(f => !string.IsNullOrWhiteSpace(f.Key) &&
                                                  // For Checkbox, require CheckboxLabel; for RadioGroup, require options; for others, require Label
@@ -229,8 +424,10 @@
                                                      : f.Type == DynamicForm.FormFieldType.RadioGroup
                                                          ? f.Options.Count > 0
                                                          : !string.IsNullOrWhiteSpace(f.Label)) &&
-                                                 // Select and RadioGroup need at least one option
-                                                 ((f.Type != DynamicForm.FormFieldType.Select && f.Type != DynamicForm.FormFieldType.RadioGroup) || f.Options.Count > 0));
+                                                 // Select, RadioGroup, and Table need at least one option/column
+                                                 ((f.Type != DynamicForm.FormFieldType.Select && f.Type != DynamicForm.FormFieldType.RadioGroup && f.Type != DynamicForm.FormFieldType.Table) || f.Options.Count > 0) &&
+                                                 // For Table fields, validate that Select columns have options
+                                                 (f.Type != DynamicForm.FormFieldType.Table || ValidateTableColumns(f)));
 
     private void AddField()
     {
@@ -251,35 +448,383 @@
 
     private void OnFieldTypeChanged(FormFieldDefinition field)
     {
-        // Clear options if switching away from Select or RadioGroup
-        if (field.Type != DynamicForm.FormFieldType.Select && field.Type != DynamicForm.FormFieldType.RadioGroup)
+        // Clear options if switching away from Select, RadioGroup, or Table
+        if (field.Type != DynamicForm.FormFieldType.Select && 
+            field.Type != DynamicForm.FormFieldType.RadioGroup && 
+            field.Type != DynamicForm.FormFieldType.Table)
         {
             field.Options.Clear();
         }
-        // Add options if switching to Select or RadioGroup and has none
-        else if (field.Options.Count == 0)
+        // If switching TO Select/RadioGroup, check if options contain table column JSON configs
+        else if (field.Type == DynamicForm.FormFieldType.Select || field.Type == DynamicForm.FormFieldType.RadioGroup)
         {
-            AddOption(field);
+            // Check if any option looks like a table column config (JSON with "Key" and "Type" properties)
+            bool hasTableColumnConfigs = field.Options.Any(opt => 
+                !string.IsNullOrEmpty(opt.Value) && 
+                (opt.Value.TrimStart().StartsWith("{") && opt.Value.Contains("\"Key\"") && opt.Value.Contains("\"Type\"")));
+            
+            if (hasTableColumnConfigs)
+            {
+                // Clear table column configurations (they're stored as JSON)
+                field.Options.Clear();
+            }
+        }
+        
+        // Add options/columns if switching to Select, RadioGroup, or Table and has none
+        if (field.Options.Count == 0)
+        {
             if (field.Type == DynamicForm.FormFieldType.RadioGroup)
             {
+                AddOption(field);
                 AddOption(field); // Add second option for RadioGroup
+            }
+            else if (field.Type == DynamicForm.FormFieldType.Table)
+            {
+                // Add default columns for table
+                AddOption(field);
+                AddOption(field);
+                AddOption(field);
+            }
+            else if (field.Type == DynamicForm.FormFieldType.Select)
+            {
+                AddOption(field);
             }
         }
     }
 
     private void AddOption(FormFieldDefinition field)
     {
-        field.Options.Add(new FormFieldOptionDefinition
+        if (field.Type == DynamicForm.FormFieldType.Table)
         {
-            Value = $"option{field.Options.Count + 1}",
-            Text = $"Option {field.Options.Count + 1}"
+            // For tables, add column definitions with strongly-typed JSON config
+            var columnKey = $"column{field.Options.Count + 1}";
+            var columnConfig = new TableColumnConfig
+            {
+                Key = columnKey,
+                Type = "Text",
+                Options = null
+            };
+
+            field.Options.Add(new FormFieldOptionDefinition
+            {
+                Value = System.Text.Json.JsonSerializer.Serialize(columnConfig),
+                Text = $"Column {field.Options.Count + 1}"
+            });
+        }
+        else
+        {
+            // For Select/RadioGroup, add options
+            field.Options.Add(new FormFieldOptionDefinition
+            {
+                Value = $"option{field.Options.Count + 1}",
+                Text = $"Option {field.Options.Count + 1}"
+            });
+        }
+    }
+
+    // Helper class for table column configuration
+    private class TableColumnConfig
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Type { get; set; } = "Text";
+        public List<TableColumnOption>? Options { get; set; }
+    }
+
+    // Helper class for table column dropdown options
+    private class TableColumnOption
+    {
+        public string Value { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+        public decimal? Price { get; set; }
+    }
+
+    private TableColumnConfig ParseTableColumnConfig(string value)
+    {
+        try
+        {
+            // Try to parse as JSON (new format)
+            var config = System.Text.Json.JsonSerializer.Deserialize<TableColumnConfig>(value);
+            if (config != null && !string.IsNullOrEmpty(config.Key))
+            {
+                return config;
+            }
+        }
+        catch
+        {
+            // If parsing fails, treat as old format (just the key)
+        }
+
+        // Fallback: treat value as key (backward compatibility)
+        // Also handle old format where Options was List<string>
+        try
+        {
+            // Try to parse as old format (List<string>)
+            var oldOptions = System.Text.Json.JsonSerializer.Deserialize<List<string>>(value);
+            if (oldOptions != null)
+            {
+                // Convert old format to new format
+                return new TableColumnConfig
+                {
+                    Key = value,
+                    Type = "Text",
+                    Options = oldOptions.Select(o => new TableColumnOption { Value = o, Text = o }).ToList()
+                };
+            }
+        }
+        catch { }
+
+        // Final fallback: treat value as key
+        return new TableColumnConfig
+        {
+            Key = value,
+            Type = "Text",
+            Options = null
+        };
+    }
+
+    private void UpdateTableColumnConfig(FormFieldOptionDefinition column, TableColumnConfig config)
+    {
+        column.Value = System.Text.Json.JsonSerializer.Serialize(config);
+    }
+
+    private void AddTableColumnOption(FormFieldOptionDefinition column, TableColumnConfig config)
+    {
+        if (config.Options == null)
+        {
+            config.Options = new List<TableColumnOption>();
+        }
+        config.Options.Add(new TableColumnOption
+        {
+            Value = $"option{config.Options.Count + 1}",
+            Text = $"Option {config.Options.Count + 1}",
+            Price = null
         });
+        UpdateTableColumnConfig(column, config);
+    }
+
+    private void RemoveTableColumnOption(FormFieldOptionDefinition column, TableColumnConfig config, TableColumnOption option)
+    {
+        config.Options?.Remove(option);
+        UpdateTableColumnConfig(column, config);
+    }
+
+    private void OnTableColumnTypeChanged(FormFieldOptionDefinition column, TableColumnConfig config)
+    {
+        // If switching to Select and has no options, add one
+        if (config.Type == "Select" && (config.Options == null || config.Options.Count == 0))
+        {
+            if (config.Options == null)
+            {
+                config.Options = new List<TableColumnOption>();
+            }
+            AddTableColumnOption(column, config);
+        }
+        // If switching away from Select, clear options
+        else if (config.Type != "Select")
+        {
+            config.Options = null;
+        }
+        UpdateTableColumnConfig(column, config);
+    }
+
+    private bool ValidateTableColumns(FormFieldDefinition field)
+    {
+        foreach (var column in field.Options)
+        {
+            var columnConfig = ParseTableColumnConfig(column.Value);
+            // If column is Select type, it must have at least one option
+            if (columnConfig.Type == "Select" && (columnConfig.Options == null || columnConfig.Options.Count == 0))
+            {
+                return false;
+            }
+            // All options must have both Value and Text
+            if (columnConfig.Options != null)
+            {
+                foreach (var option in columnConfig.Options)
+                {
+                    if (string.IsNullOrWhiteSpace(option.Value) || string.IsNullOrWhiteSpace(option.Text))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     private void RemoveOption(FormFieldDefinition field, FormFieldOptionDefinition option)
     {
+        // Remove the option price when removing the option
+        RemoveOptionPrice(field, option.Value);
         field.Options.Remove(option);
     }
+
+    #region Option Price Management
+
+    // Helper class for storing option pricing configuration
+    private class OptionPricingConfig
+    {
+        public bool UsePerOptionPricing { get; set; }
+        public Dictionary<string, decimal> OptionPrices { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Get option pricing configuration from field's DefaultValueJson.
+    /// </summary>
+    private OptionPricingConfig GetOptionPricingConfig(FormFieldDefinition field)
+    {
+        if (string.IsNullOrWhiteSpace(field.DefaultValueJson))
+        {
+            return new OptionPricingConfig();
+        }
+
+        try
+        {
+            // Try to deserialize as OptionPricingConfig first
+            var config = System.Text.Json.JsonSerializer.Deserialize<OptionPricingConfig>(field.DefaultValueJson);
+            if (config != null)
+            {
+                return config;
+            }
+        }
+        catch
+        {
+            // If that fails, try old format (just dictionary of prices)
+            try
+            {
+                var prices = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, decimal>>(field.DefaultValueJson);
+                if (prices != null && prices.Count > 0)
+                {
+                    // Migrate old format to new format
+                    return new OptionPricingConfig
+                    {
+                        UsePerOptionPricing = true, // Assume enabled if prices exist
+                        OptionPrices = prices
+                    };
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
+        }
+
+        return new OptionPricingConfig();
+    }
+
+    /// <summary>
+    /// Save option pricing configuration to field's DefaultValueJson.
+    /// </summary>
+    private void SaveOptionPricingConfig(FormFieldDefinition field, OptionPricingConfig config)
+    {
+        // If per-option pricing is disabled and no prices, clear the config
+        if (!config.UsePerOptionPricing && (config.OptionPrices.Count == 0 || config.OptionPrices.All(p => p.Value == 0)))
+        {
+            field.DefaultValueJson = null;
+        }
+        else
+        {
+            // Save the config with the toggle state, even if no prices are set yet
+            // Only save non-zero prices in the dictionary
+            var nonZeroPrices = config.OptionPrices.Where(p => p.Value > 0).ToDictionary(p => p.Key, p => p.Value);
+            var configToSave = new OptionPricingConfig
+            {
+                UsePerOptionPricing = config.UsePerOptionPricing,
+                OptionPrices = nonZeroPrices
+            };
+            field.DefaultValueJson = System.Text.Json.JsonSerializer.Serialize(configToSave);
+        }
+    }
+
+    /// <summary>
+    /// Check if per-option pricing is enabled for this field.
+    /// </summary>
+    private bool IsPerOptionPricingEnabled(FormFieldDefinition field)
+    {
+        return GetOptionPricingConfig(field).UsePerOptionPricing;
+    }
+
+    /// <summary>
+    /// Toggle per-option pricing on/off.
+    /// </summary>
+    private void TogglePerOptionPricing(FormFieldDefinition field, bool enabled)
+    {
+        var config = GetOptionPricingConfig(field);
+        config.UsePerOptionPricing = enabled;
+        
+        // If disabling, clear all prices
+        if (!enabled)
+        {
+            config.OptionPrices.Clear();
+        }
+        
+        SaveOptionPricingConfig(field, config);
+        StateHasChanged(); // Force UI update to show/hide price inputs
+    }
+
+    /// <summary>
+    /// Get option prices dictionary from field's DefaultValueJson or create new one.
+    /// </summary>
+    private Dictionary<string, decimal> GetOptionPrices(FormFieldDefinition field)
+    {
+        return GetOptionPricingConfig(field).OptionPrices;
+    }
+
+    /// <summary>
+    /// Get price for a specific option.
+    /// </summary>
+    private decimal GetOptionPrice(FormFieldDefinition field, string optionValue)
+    {
+        var prices = GetOptionPrices(field);
+        return prices.TryGetValue(optionValue, out var price) ? price : 0;
+    }
+
+    /// <summary>
+    /// Set price for a specific option.
+    /// </summary>
+    private void SetOptionPrice(FormFieldDefinition field, string optionValue, decimal price)
+    {
+        var config = GetOptionPricingConfig(field);
+        if (price > 0)
+        {
+            config.OptionPrices[optionValue] = price;
+        }
+        else
+        {
+            config.OptionPrices.Remove(optionValue);
+        }
+        SaveOptionPricingConfig(field, config);
+    }
+
+    /// <summary>
+    /// Remove price for a specific option (when option is removed or value changes).
+    /// </summary>
+    private void RemoveOptionPrice(FormFieldDefinition field, string oldOptionValue)
+    {
+        if (string.IsNullOrWhiteSpace(oldOptionValue))
+            return;
+
+        var config = GetOptionPricingConfig(field);
+        config.OptionPrices.Remove(oldOptionValue);
+        SaveOptionPricingConfig(field, config);
+    }
+
+    /// <summary>
+    /// Handle option value change - update price mapping if value changed.
+    /// </summary>
+    private void OnOptionValueChanged(FormFieldDefinition field, FormFieldOptionDefinition option, decimal currentPrice)
+    {
+        // If the value changed, we need to update the price mapping
+        // This is handled by the binding, but we ensure price is preserved
+        var config = GetOptionPricingConfig(field);
+        if (currentPrice > 0 && !string.IsNullOrWhiteSpace(option.Value))
+        {
+            config.OptionPrices[option.Value] = currentPrice;
+            SaveOptionPricingConfig(field, config);
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Get list of fields that can be parents for the given field.
@@ -314,22 +859,50 @@
         {
             if (ToastRef is not null)
             {
-                await ToastRef.ShowAsync("Please fill in all required fields (Form Name, Keys, Labels, and Checkbox Labels). Select and RadioGroup fields must have at least one option.", "danger", 4000);
+                await ToastRef.ShowAsync("Please fill in all required fields (Form Name, Keys, Labels, and Checkbox Labels). Select, RadioGroup, and Table fields must have at least one option/column.", "danger", 4000);
             }
             return;
         }
 
         try
         {
-            var form = new FormDefinition
+            FormDefinition form;
+            
+            if (IsEditing && !string.IsNullOrWhiteSpace(FormName))
             {
-                Name = FormName.Trim(),
-                Description = FormDescription?.Trim(),
-                Fields = EditingFields.Select(f => new FormFieldDefinition
+                // Update existing form
+                // FormName in URL has spaces removed, so we need to compare with normalized names
+                var existingForm = await Db.FormDefinitions
+                    .Include(f => f.Fields)
+                    .ThenInclude(f => f.Options)
+                    .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == FormName);
+
+                if (existingForm is null)
+                {
+                    if (ToastRef is not null)
+                    {
+                        await ToastRef.ShowAsync("Form not found.", "danger");
+                    }
+                    return;
+                }
+
+                form = existingForm;
+
+                // Update form properties
+                form.Name = FormNameInput.Trim();
+                form.Description = FormDescription?.Trim();
+
+                // Remove all existing fields and options (we'll recreate them)
+                foreach (var field in form.Fields.ToList())
+                {
+                    Db.FormFieldOptionDefinitions.RemoveRange(field.Options);
+                    Db.FormFieldDefinitions.Remove(field);
+                }
+
+                // Add updated fields
+                form.Fields = EditingFields.Select(f => new FormFieldDefinition
                 {
                     Key = f.Key.Trim(),
-                    // For Checkbox, use CheckboxLabel as Label since Label field is hidden
-                    // For RadioGroup, use Key as label since it doesn't have a visible label
                     Label = f.Type == DynamicForm.FormFieldType.Checkbox 
                         ? (f.CheckboxLabel?.Trim() ?? string.Empty) 
                         : f.Type == DynamicForm.FormFieldType.RadioGroup
@@ -342,25 +915,63 @@
                     Price = f.Price,
                     ParentFieldKey = string.IsNullOrWhiteSpace(f.ParentFieldKey) ? null : f.ParentFieldKey.Trim(),
                     MutuallyExclusiveWith = string.IsNullOrWhiteSpace(f.MutuallyExclusiveWith) ? null : f.MutuallyExclusiveWith.Trim(),
+                    DefaultValueJson = f.DefaultValueJson, // Save option prices
                     Options = f.Options.Select(o => new FormFieldOptionDefinition
                     {
                         Value = o.Value.Trim(),
                         Text = o.Text.Trim()
                     }).ToList()
-                }).ToList()
-            };
+                }).ToList();
 
-            Db.FormDefinitions.Add(form);
-            await Db.SaveChangesAsync();
+                await Db.SaveChangesAsync();
 
-            if (ToastRef is not null)
+                if (ToastRef is not null)
+                {
+                    await ToastRef.ShowAsync($"Form updated successfully!", "success");
+                }
+            }
+            else
             {
-                await ToastRef.ShowAsync($"Form saved successfully! Form ID: {form.Id}", "success");
+                // Create new form
+                form = new FormDefinition
+                {
+                    Name = FormNameInput.Trim(),
+                    Description = FormDescription?.Trim(),
+                    Fields = EditingFields.Select(f => new FormFieldDefinition
+                    {
+                        Key = f.Key.Trim(),
+                        Label = f.Type == DynamicForm.FormFieldType.Checkbox 
+                            ? (f.CheckboxLabel?.Trim() ?? string.Empty) 
+                            : f.Type == DynamicForm.FormFieldType.RadioGroup
+                                ? f.Key.Trim()
+                                : f.Label.Trim(),
+                        Type = f.Type,
+                        Placeholder = f.Placeholder?.Trim(),
+                        CheckboxLabel = f.CheckboxLabel?.Trim(),
+                        HelpText = f.HelpText?.Trim(),
+                        Price = f.Price,
+                        ParentFieldKey = string.IsNullOrWhiteSpace(f.ParentFieldKey) ? null : f.ParentFieldKey.Trim(),
+                        MutuallyExclusiveWith = string.IsNullOrWhiteSpace(f.MutuallyExclusiveWith) ? null : f.MutuallyExclusiveWith.Trim(),
+                        Options = f.Options.Select(o => new FormFieldOptionDefinition
+                        {
+                            Value = o.Value.Trim(),
+                            Text = o.Text.Trim()
+                        }).ToList()
+                    }).ToList()
+                };
+
+                Db.FormDefinitions.Add(form);
+                await Db.SaveChangesAsync();
+
+                if (ToastRef is not null)
+                {
+                    await ToastRef.ShowAsync($"Form saved successfully! Form ID: {form.Id}", "success");
+                }
             }
             
             // Navigate to view the form after a short delay
             await Task.Delay(1500);
-            Navigation.NavigateTo($"/fill-form/{form.Id}");
+            Navigation.NavigateTo($"/fill-form/{form.Name.Replace(" ", "")}");
         }
         catch (Exception ex)
         {
@@ -376,3 +987,4 @@
         Navigation.NavigateTo("/");
     }
 }
+

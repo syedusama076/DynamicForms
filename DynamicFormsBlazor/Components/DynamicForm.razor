@@ -13,9 +13,13 @@
                     var marginLeft = nestingLevel * 24; // 24px per nesting level
 
                     <div class="mb-3" style="@(nestingLevel > 0 ? $"margin-left: {marginLeft}px; padding-left: 12px; border-left: 2px solid #dee2e6;" : "")">
-                        @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText && field.Type != FormFieldType.RadioGroup)
+                        @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText && field.Type != FormFieldType.RadioGroup && field.Type != FormFieldType.Table)
                         {
                             <label class="form-label">@((MarkupString)ReplaceVariables(field.Label, field))</label>
+                        }
+                        @if (field.Type == FormFieldType.Table && !string.IsNullOrWhiteSpace(field.Label))
+                        {
+                            <label class="form-label fw-bold mb-2">@((MarkupString)ReplaceVariables(field.Label, field))</label>
                         }
 
                         @switch (field.Type)
@@ -65,9 +69,9 @@
                                                    id="@($"{field.Key}_{option.Value}")"
                                                    value="@option.Value"
                                                    checked="@(GetStringValue(field.Key) == option.Value)"
-                                                   @onchange="e => SetStringValue(field.Key, option.Value)" />
+                                                   @onchange="@((ChangeEventArgs e) => { SetStringValue(field.Key, e.Value?.ToString() ?? option.Value); })" />
                                             <label class="form-check-label" for="@($"{field.Key}_{option.Value}")">
-                                                @((MarkupString)ReplaceVariablesForOption(option.Text, field))
+                                                @((MarkupString)ReplaceVariablesForOption(option.Text, field, option))
                                             </label>
                                         </div>
                                     }
@@ -87,7 +91,8 @@
                                     {
                                         @foreach (var option in field.Options)
                                         {
-                                            <option value="@option.Value">@option.Text</option>
+                                            var displayText = ReplaceVariablesForOption(option.Text, field, option);
+                                            <option value="@option.Value">@((MarkupString)displayText)</option>
                                         }
                                     }
                                 </select>
@@ -95,6 +100,96 @@
 
                             case FormFieldType.StaticText:
                                 <p class="mb-0 fw-semibold">@((MarkupString)ReplaceVariables(field.Label, field))</p>
+                                break;
+
+                            case FormFieldType.Table:
+                                @if (field.Options is not null && field.Options.Count > 0)
+                                {
+                                    var tableData = GetTableData(field.Key);
+                                    <div class="table-responsive">
+                                        <table class="table table-bordered">
+                                            <thead>
+                                                <tr>
+                                                    @foreach (var column in field.Options)
+                                                    {
+                                                        <th>@column.Text</th>
+                                                    }
+                                                    <th style="width: 80px;">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @for (int rowIndex = 0; rowIndex < tableData.Count; rowIndex++)
+                                                {
+                                                    var currentRowIndex = rowIndex; // Capture the index to avoid closure issues
+                                                    var row = tableData[rowIndex];
+                                                    <tr>
+                                                        @foreach (var column in field.Options)
+                                                        {
+                                                            var columnConfig = ParseTableColumnConfig(column.Value);
+                                                            var columnKey = columnConfig.Key;
+                                                            var cellValue = row.ContainsKey(columnKey) ? row[columnKey]?.ToString() : "";
+                                                            <td>
+                                                                @if (columnConfig.Type == "Checkbox")
+                                                                {
+                                                                    <div class="form-check d-flex justify-content-center">
+                                                                        <input class="form-check-input" 
+                                                                               type="checkbox" 
+                                                                               checked="@(cellValue == "true" || cellValue == "True" || cellValue == "1")"
+                                                                               @onchange="e => UpdateTableCell(field.Key, currentRowIndex, columnKey, ((bool?)e.Value ?? false).ToString())" />
+                                                                    </div>
+                                                                }
+                                                                else if (columnConfig.Type == "Select" && columnConfig.Options != null && columnConfig.Options.Count > 0)
+                                                                {
+                                                                    <select class="form-select form-select-sm" 
+                                                                            value="@cellValue"
+                                                                            @onchange="e => UpdateTableCell(field.Key, currentRowIndex, columnKey, e.Value?.ToString())">
+                                                                        <option value="">-- Select --</option>
+                                                                        @foreach (var option in columnConfig.Options)
+                                                                        {
+                                                                            <option value="@option.Value">@option.Text</option>
+                                                                        }
+                                                                    </select>
+                                                                }
+                                                                else if (columnConfig.Type == "Number")
+                                                                {
+                                                                    <input type="number" 
+                                                                           class="form-control form-control-sm" 
+                                                                           value="@cellValue"
+                                                                           step="any"
+                                                                           @oninput="e => UpdateTableCell(field.Key, currentRowIndex, columnKey, e.Value?.ToString())" />
+                                                                }
+                                                                else
+                                                                {
+                                                                    <input type="text" 
+                                                                           class="form-control form-control-sm" 
+                                                                           value="@cellValue"
+                                                                           @oninput="e => UpdateTableCell(field.Key, currentRowIndex, columnKey, e.Value?.ToString())" />
+                                                                }
+                                                            </td>
+                                                        }
+                                                        <td>
+                                                            <button type="button" 
+                                                                    class="btn btn-sm btn-danger" 
+                                                                    @onclick="() => RemoveTableRow(field.Key, currentRowIndex)"
+                                                                    title="Remove row">
+                                                                ×
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <button type="button" 
+                                            class="btn btn-sm btn-primary mt-2" 
+                                            @onclick="() => AddTableRow(field.Key, field.Options)">
+                                        + Add Row
+                                    </button>
+                                }
+                                else
+                                {
+                                    <div class="alert alert-warning">No columns defined for this table. Please configure columns in the form designer.</div>
+                                }
                                 break;
                         }
 
@@ -150,7 +245,15 @@
         {
             if (field.Type != FormFieldType.StaticText && !Values.ContainsKey(field.Key))
             {
-                Values[field.Key] = field.DefaultValue;
+                if (field.Type == FormFieldType.Table)
+                {
+                    // Initialize table with empty list
+                    Values[field.Key] = new List<Dictionary<string, object?>>();
+                }
+                else
+                {
+                    Values[field.Key] = field.DefaultValue;
+                }
             }
         }
     }
@@ -236,6 +339,10 @@
             else if (child.Type == FormFieldType.RadioGroup)
             {
                 Values[child.Key] = null;
+            }
+            else if (child.Type == FormFieldType.Table)
+            {
+                Values[child.Key] = new List<Dictionary<string, object?>>();
             }
             else if (child.Type != FormFieldType.StaticText)
             {
@@ -323,9 +430,11 @@
     #region Price Calculations
 
     /// <summary>
-    /// Check if any field has a price set.
+    /// Check if any field has a price set (either field-level or option-level).
     /// </summary>
-    private bool HasPricedFields => Fields.Any(f => f.Price.HasValue && f.Price.Value > 0);
+    private bool HasPricedFields => Fields.Any(f => 
+        (f.Price.HasValue && f.Price.Value > 0) || 
+        (f.Options != null && f.Options.Any(o => o.Price.HasValue && o.Price.Value > 0)));
 
     /// <summary>
     /// Get the current calculated total of all priced fields.
@@ -343,36 +452,52 @@
         if (!IsFieldVisible(field))
             return 0;
 
-        if (!field.Price.HasValue || field.Price.Value == 0)
-            return 0;
-
         switch (field.Type)
         {
             case FormFieldType.Checkbox:
                 // Add price if checked
-                return GetBoolValue(field.Key) ? field.Price.Value : 0;
+                if (field.Price.HasValue && field.Price.Value > 0)
+                    return GetBoolValue(field.Key) ? field.Price.Value : 0;
+                return 0;
 
             case FormFieldType.Number:
                 // Multiply price by quantity
-                var numStr = GetStringValue(field.Key);
-                if (decimal.TryParse(numStr, out var qty) && qty > 0)
-                    return field.Price.Value * qty;
+                if (field.Price.HasValue && field.Price.Value > 0)
+                {
+                    var numStr = GetStringValue(field.Key);
+                    if (decimal.TryParse(numStr, out var qty) && qty > 0)
+                        return field.Price.Value * qty;
+                }
                 return 0;
 
             case FormFieldType.Select:
             case FormFieldType.RadioGroup:
-                // If selected value is numeric, multiply by price; otherwise just add price if selected
                 var selStr = GetStringValue(field.Key);
                 if (string.IsNullOrEmpty(selStr))
                     return 0;
-                // Try to parse as number
-                if (decimal.TryParse(selStr, out var selQty))
+                
+                // Check if the selected option has a specific price (priority)
+                var selectedOption = field.Options?.FirstOrDefault(o => o.Value == selStr);
+                if (selectedOption?.Price.HasValue == true && selectedOption.Price.Value > 0)
                 {
-                    // If numeric (including 0), multiply by price
-                    return selQty >= 0 ? field.Price.Value * selQty : 0;
+                    // Use option-specific price
+                    return selectedOption.Price.Value;
                 }
-                // Non-numeric selection (like "yes", "option1"): just add price once
-                return field.Price.Value;
+                
+                // Fall back to field-level price if no option price is set
+                if (field.Price.HasValue && field.Price.Value > 0)
+                {
+                    // Try to parse as number
+                    if (decimal.TryParse(selStr, out var selQty))
+                    {
+                        // If numeric (including 0), multiply by price
+                        return selQty >= 0 ? field.Price.Value * selQty : 0;
+                    }
+                    // Non-numeric selection (like "yes", "option1"): just add price once
+                    return field.Price.Value;
+                }
+                
+                return 0;
 
             default:
                 return 0;
@@ -433,25 +558,186 @@
     }
 
     /// <summary>
-    /// Replace variables for radio option text (uses field's price for {price}).
+    /// Replace variables for radio/select option text (uses option's price if available, otherwise field's price).
     /// </summary>
-    private string ReplaceVariablesForOption(string? text, FormField parentField)
+    private string ReplaceVariablesForOption(string? text, FormField parentField, FormFieldOption? option = null)
     {
         if (string.IsNullOrEmpty(text))
             return string.Empty;
 
         var result = text;
 
-        // {price} - the price of the parent field
+        // {price} - the price of the option (if set) or the parent field
         if (result.Contains("{price}"))
         {
-            var priceStr = parentField.Price.HasValue 
-                ? parentField.Price.Value.ToString("C") 
+            decimal? price = null;
+            if (option?.Price.HasValue == true && option.Price.Value > 0)
+            {
+                price = option.Price;
+            }
+            else if (parentField.Price.HasValue && parentField.Price.Value > 0)
+            {
+                price = parentField.Price;
+            }
+            
+            var priceStr = price.HasValue 
+                ? price.Value.ToString("C") 
                 : "$0.00";
             result = result.Replace("{price}", $"<span class=\"text-primary fw-bold\">{priceStr}</span>");
         }
 
         return result;
+    }
+
+    #endregion
+
+    #region Table Management
+
+    // Helper class for table column configuration
+    private class TableColumnConfig
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Type { get; set; } = "Text";
+        public List<TableColumnOption>? Options { get; set; }
+    }
+
+    // Helper class for table column dropdown options
+    private class TableColumnOption
+    {
+        public string Value { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+        public decimal? Price { get; set; }
+    }
+
+    private TableColumnConfig ParseTableColumnConfig(string value)
+    {
+        try
+        {
+            // Try to parse as JSON (new format)
+            var config = System.Text.Json.JsonSerializer.Deserialize<TableColumnConfig>(value);
+            if (config != null && !string.IsNullOrEmpty(config.Key))
+            {
+                return config;
+            }
+        }
+        catch
+        {
+            // If parsing fails, try old format (List<string>)
+            try
+            {
+                var oldOptions = System.Text.Json.JsonSerializer.Deserialize<List<string>>(value);
+                if (oldOptions != null)
+                {
+                    // Convert old format to new format
+                    return new TableColumnConfig
+                    {
+                        Key = value,
+                        Type = "Text",
+                        Options = oldOptions.Select(o => new TableColumnOption { Value = o, Text = o, Price = null }).ToList()
+                    };
+                }
+            }
+            catch { }
+        }
+
+        // Final fallback: treat value as key (backward compatibility)
+        return new TableColumnConfig
+        {
+            Key = value,
+            Type = "Text",
+            Options = null
+        };
+    }
+
+    /// <summary>
+    /// Get table data as a list of dictionaries (rows).
+    /// </summary>
+    private List<Dictionary<string, object?>> GetTableData(string key)
+    {
+        if (Values.TryGetValue(key, out var value) && value is not null)
+        {
+            try
+            {
+                // Try to deserialize as list of dictionaries
+                var json = System.Text.Json.JsonSerializer.Serialize(value);
+                var result = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(json);
+                return result ?? new List<Dictionary<string, object?>>();
+            }
+            catch
+            {
+                // If deserialization fails, return empty list
+                return new List<Dictionary<string, object?>>();
+            }
+        }
+        return new List<Dictionary<string, object?>>();
+    }
+
+    /// <summary>
+    /// Update a specific cell in the table.
+    /// </summary>
+    private void UpdateTableCell(string tableKey, int rowIndex, string columnKey, string? value)
+    {
+        var tableData = GetTableData(tableKey);
+        
+        // Ensure we have enough rows
+        while (tableData.Count <= rowIndex)
+        {
+            tableData.Add(new Dictionary<string, object?>());
+        }
+
+        // Update the cell value
+        tableData[rowIndex][columnKey] = value;
+        
+        // Save back to Values
+        Values[tableKey] = tableData;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Add a new row to the table.
+    /// </summary>
+    private void AddTableRow(string tableKey, List<FormFieldOption>? columns)
+    {
+        var tableData = GetTableData(tableKey);
+        var newRow = new Dictionary<string, object?>();
+        
+        // Initialize all columns with empty values
+        if (columns is not null)
+        {
+            foreach (var column in columns)
+            {
+                var columnConfig = ParseTableColumnConfig(column.Value);
+                var columnKey = columnConfig.Key;
+                
+                // Set default value based on column type
+                if (columnConfig.Type == "Checkbox")
+                {
+                    newRow[columnKey] = false;
+                }
+                else
+                {
+                    newRow[columnKey] = string.Empty;
+                }
+            }
+        }
+        
+        tableData.Add(newRow);
+        Values[tableKey] = tableData;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Remove a row from the table.
+    /// </summary>
+    private void RemoveTableRow(string tableKey, int rowIndex)
+    {
+        var tableData = GetTableData(tableKey);
+        if (rowIndex >= 0 && rowIndex < tableData.Count)
+        {
+            tableData.RemoveAt(rowIndex);
+            Values[tableKey] = tableData;
+            StateHasChanged();
+        }
     }
 
     #endregion
@@ -466,7 +752,8 @@
         Checkbox,
         Select,
         StaticText,
-        RadioGroup
+        RadioGroup,
+        Table
     }
 
     public class FormField
@@ -534,6 +821,7 @@
     {
         public string Value { get; set; } = string.Empty;
         public string Text { get; set; } = string.Empty;
+        public decimal? Price { get; set; }
     }
 
     #endregion
