@@ -8,6 +8,11 @@ public class FormDefinition
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    
+    /// <summary>
+    /// Optional prefix for the form (e.g., URL prefix, identifier prefix).
+    /// </summary>
+    public string? Prefix { get; set; }
 
     public List<FormFieldDefinition> Fields { get; set; } = new();
 }
@@ -22,6 +27,12 @@ public class FormFieldDefinition
     public string Key { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
     public DynamicForm.FormFieldType Type { get; set; }
+
+    /// <summary>
+    /// Indicates whether this field is required.
+    /// Used to render a required asterisk and can be wired to validation.
+    /// </summary>
+    public bool IsRequired { get; set; }
 
     public string? Placeholder { get; set; }
     public string? CheckboxLabel { get; set; }

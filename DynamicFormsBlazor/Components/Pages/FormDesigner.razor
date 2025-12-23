@@ -26,6 +26,12 @@
             <label class="form-label">Description</label>
             <textarea class="form-control" @bind="FormDescription" rows="2" placeholder="Optional description"></textarea>
         </div>
+
+        <div class="mb-3">
+            <label class="form-label">Prefix</label>
+            <input class="form-control" @bind="FormPrefix" placeholder="e.g., /api/forms/, FORM-" />
+            <small class="form-text text-muted">Optional prefix for the form (e.g., URL prefix, identifier prefix)</small>
+        </div>
     </div>
 </div>
 
@@ -40,7 +46,7 @@
 {
     <div class="card mb-3">
         <div class="card-body">
-            <div class="row g-3">
+            <div class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label">Key <span class="text-danger">*</span></label>
                     <input class="form-control" @bind="field.Key" placeholder="fieldKey" />
@@ -48,7 +54,15 @@
                 @if (field.Type != DynamicForm.FormFieldType.Checkbox && field.Type != DynamicForm.FormFieldType.RadioGroup)
                 {
                     <div class="col-md-3">
-                        <label class="form-label">@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text" : "Label") <span class="text-danger">*</span></label>
+                        <label class="form-label d-flex justify-content-between align-items-center">
+                            <span>@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text" : "Label") <span class="text-danger">*</span></span>
+                            <span class="form-check form-check-inline mb-0 small">
+                                <input class="form-check-input" type="checkbox" id="@($"required_{field.Key}")" @bind="field.IsRequired" />
+                                <label class="form-check-label" for="@($"required_{field.Key}")">
+                                    Required
+                                </label>
+                            </span>
+                        </label>
                         <input class="form-control" @bind="field.Label" placeholder="@((field.Type == DynamicForm.FormFieldType.StaticText) ? "Text to display" : "Field Label")" />
                     </div>
                 }
@@ -345,6 +359,7 @@
 
     private string FormNameInput { get; set; } = string.Empty;
     private string? FormDescription { get; set; }
+    private string? FormPrefix { get; set; }
 
     private List<FormFieldDefinition> EditingFields { get; set; } = new();
     private bool IsEditing => !string.IsNullOrWhiteSpace(FormName);
@@ -368,6 +383,7 @@
                 {
                     FormNameInput = existingForm.Name;
                     FormDescription = existingForm.Description;
+                    FormPrefix = existingForm.Prefix;
 
                     // Load existing fields
                     EditingFields = existingForm.Fields.Select(f => new FormFieldDefinition
@@ -383,6 +399,7 @@
                         ParentFieldKey = f.ParentFieldKey,
                         MutuallyExclusiveWith = f.MutuallyExclusiveWith,
                         DefaultValueJson = f.DefaultValueJson, // Preserve option prices
+                        IsRequired = f.IsRequired,
                         Options = f.Options.Select(o => new FormFieldOptionDefinition
                         {
                             Id = o.Id,
@@ -435,7 +452,8 @@
         {
             Key = $"field{EditingFields.Count + 1}",
             Label = "New Field",
-            Type = DynamicForm.FormFieldType.Text
+            Type = DynamicForm.FormFieldType.Text,
+            IsRequired = false
         });
 
         Console.WriteLine("New field count after AddField: " + EditingFields.Count);
@@ -891,6 +909,7 @@
                 // Update form properties
                 form.Name = FormNameInput.Trim();
                 form.Description = FormDescription?.Trim();
+                form.Prefix = FormPrefix?.Trim();
 
                 // Remove all existing fields and options (we'll recreate them)
                 foreach (var field in form.Fields.ToList())
@@ -903,8 +922,8 @@
                 form.Fields = EditingFields.Select(f => new FormFieldDefinition
                 {
                     Key = f.Key.Trim(),
-                    Label = f.Type == DynamicForm.FormFieldType.Checkbox 
-                        ? (f.CheckboxLabel?.Trim() ?? string.Empty) 
+                    Label = f.Type == DynamicForm.FormFieldType.Checkbox
+                        ? (f.CheckboxLabel?.Trim() ?? string.Empty)
                         : f.Type == DynamicForm.FormFieldType.RadioGroup
                             ? f.Key.Trim()
                             : f.Label.Trim(),
@@ -916,6 +935,7 @@
                     ParentFieldKey = string.IsNullOrWhiteSpace(f.ParentFieldKey) ? null : f.ParentFieldKey.Trim(),
                     MutuallyExclusiveWith = string.IsNullOrWhiteSpace(f.MutuallyExclusiveWith) ? null : f.MutuallyExclusiveWith.Trim(),
                     DefaultValueJson = f.DefaultValueJson, // Save option prices
+                    IsRequired = f.IsRequired,
                     Options = f.Options.Select(o => new FormFieldOptionDefinition
                     {
                         Value = o.Value.Trim(),
@@ -937,11 +957,12 @@
                 {
                     Name = FormNameInput.Trim(),
                     Description = FormDescription?.Trim(),
+                    Prefix = FormPrefix?.Trim(),
                     Fields = EditingFields.Select(f => new FormFieldDefinition
                     {
                         Key = f.Key.Trim(),
-                        Label = f.Type == DynamicForm.FormFieldType.Checkbox 
-                            ? (f.CheckboxLabel?.Trim() ?? string.Empty) 
+                        Label = f.Type == DynamicForm.FormFieldType.Checkbox
+                            ? (f.CheckboxLabel?.Trim() ?? string.Empty)
                             : f.Type == DynamicForm.FormFieldType.RadioGroup
                                 ? f.Key.Trim()
                                 : f.Label.Trim(),
@@ -952,6 +973,7 @@
                         Price = f.Price,
                         ParentFieldKey = string.IsNullOrWhiteSpace(f.ParentFieldKey) ? null : f.ParentFieldKey.Trim(),
                         MutuallyExclusiveWith = string.IsNullOrWhiteSpace(f.MutuallyExclusiveWith) ? null : f.MutuallyExclusiveWith.Trim(),
+                        IsRequired = f.IsRequired,
                         Options = f.Options.Select(o => new FormFieldOptionDefinition
                         {
                             Value = o.Value.Trim(),

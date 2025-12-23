@@ -2,20 +2,23 @@
 @using System.Linq
 @using System.Text.RegularExpressions
 
-<div class="card">
-    <div class="card-body">
-        <form @onsubmit="HandleSubmit">
+<form class="aoa-form" @onsubmit="HandleSubmit">
             @foreach (var field in Fields)
             {
                 @if (IsFieldVisible(field))
                 {
                     var nestingLevel = GetNestingLevel(field);
                     var marginLeft = nestingLevel * 24; // 24px per nesting level
+                    var isHorizontalField = field.Type != FormFieldType.Checkbox
+                                            && field.Type != FormFieldType.StaticText
+                                            && field.Type != FormFieldType.RadioGroup
+                                            && field.Type != FormFieldType.Table;
 
-                    <div class="mb-3" style="@(nestingLevel > 0 ? $"margin-left: {marginLeft}px; padding-left: 12px; border-left: 2px solid #dee2e6;" : "")">
+                    <div class="mb-3 @(isHorizontalField ? "aoa-horizontal-group" : string.Empty)" 
+                         style="@(nestingLevel > 0 ? $"margin-left: {marginLeft}px; padding-left: 12px; border-left: 2px solid #dee2e6;" : "")">
                         @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText && field.Type != FormFieldType.RadioGroup && field.Type != FormFieldType.Table)
                         {
-                            <label class="form-label">@((MarkupString)ReplaceVariables(field.Label, field))</label>
+                            <label class="form-label">@((MarkupString)GetDisplayLabel(field))</label>
                         }
                         @if (field.Type == FormFieldType.Table && !string.IsNullOrWhiteSpace(field.Label))
                         {
@@ -29,7 +32,8 @@
                                        type="text"
                                        placeholder="@field.Placeholder"
                                        value="@GetStringValue(field.Key)"
-                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())"
+                                       required="@field.IsRequired" />
                                 break;
 
                             case FormFieldType.Number:
@@ -37,14 +41,16 @@
                                        type="number"
                                        placeholder="@field.Placeholder"
                                        value="@GetStringValue(field.Key)"
-                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())"
+                                       required="@field.IsRequired" />
                                 break;
 
                             case FormFieldType.Date:
                                 <input class="form-control"
                                        type="date"
                                        value="@GetStringValue(field.Key)"
-                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())" />
+                                       @oninput="e => SetStringValue(field.Key, e.Value?.ToString())"
+                                       required="@field.IsRequired" />
                                 break;
 
                             case FormFieldType.Checkbox:
@@ -81,7 +87,8 @@
                             case FormFieldType.Select:
                                 <select class="form-select"
                                         value="@GetStringValue(field.Key)"
-                                        @onchange="e => SetStringValue(field.Key, e.Value?.ToString())">
+                                        @onchange="e => SetStringValue(field.Key, e.Value?.ToString())"
+                                        required="@field.IsRequired">
                                     @if (!string.IsNullOrWhiteSpace(field.Placeholder))
                                     {
                                         <option value="">@field.Placeholder</option>
@@ -201,35 +208,33 @@
                 }
             }
 
-            @* Always show total if there are priced fields *@
-            @if (HasPricedFields)
-            {
-                <div class="card bg-light mb-3">
-                    <div class="card-body py-2">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span class="fw-bold">Grand Total:</span>
-                            <span class="text-success fw-bold fs-4">@CalculateTotal().ToString("C")</span>
-                        </div>
+            <div class="aoa-form-footer">
+                @* Always show total if there are priced fields *@
+                @if (HasPricedFields)
+                {
+                    <div class="mb-3 aoa-grand-total-row">
+                        <span class="aoa-grand-total-label">Grand Total (USD):</span>
+                        <span class="aoa-grand-total-amount">@CalculateTotal().ToString("0.##")</span>
                     </div>
-                </div>
-            }
+                }
 
-            @* reCAPTCHA *@
-            @if (ShowCaptcha)
-            {
-                <div class="mb-3">
-                    <div id="@CaptchaContainerId" data-sitekey="@CaptchaSiteKey"></div>
-                    @if (!string.IsNullOrEmpty(CaptchaError))
-                    {
-                        <div class="text-danger small mt-1">@CaptchaError</div>
-                    }
-                </div>
-            }
+                @* reCAPTCHA *@
+                @if (ShowCaptcha)
+                {
+                    <div class="mb-3">
+                        <div id="@CaptchaContainerId" data-sitekey="@CaptchaSiteKey"></div>
+                        @if (!string.IsNullOrEmpty(CaptchaError))
+                        {
+                            <div class="text-danger small mt-1">@CaptchaError</div>
+                        }
+                    </div>
+                }
 
-            <button type="submit" class="btn btn-primary" disabled="@(!IsCaptchaValid && ShowCaptcha)">@SubmitText</button>
+                <div class="aoa-footer-actions">
+                    <button type="submit" class="btn btn-primary" disabled="@(!IsCaptchaValid && ShowCaptcha)">@SubmitText</button>
+                </div>
+            </div>
         </form>
-    </div>
-</div>
 
 @code {
     [Parameter]
@@ -672,6 +677,30 @@
     }
 
     /// <summary>
+    /// Build the display label for a field, including required asterisk and colon,
+    /// while still supporting {price}/{subtotal}/{total} variables.
+    /// </summary>
+    private string GetDisplayLabel(FormField field)
+    {
+        var baseLabel = ReplaceVariables(field.Label, field) ?? string.Empty;
+
+        // Ensure trailing colon like the original form, if there is any label text.
+        if (!string.IsNullOrWhiteSpace(baseLabel) && !baseLabel.TrimEnd().EndsWith(":"))
+        {
+            baseLabel += ":";
+        }
+
+        // Prefix required asterisk when needed.
+        if (field.IsRequired)
+        {
+            // Red asterisk similar to typical required styling.
+            baseLabel = $"<span class=\"text-danger\">*</span> {baseLabel}";
+        }
+
+        return baseLabel;
+    }
+
+    /// <summary>
     /// Replace variables for radio/select option text (uses option's price if available, otherwise field's price).
     /// </summary>
     private string ReplaceVariablesForOption(string? text, FormField parentField, FormFieldOption? option = null)
@@ -886,6 +915,11 @@
         /// Type of control to render.
         /// </summary>
         public FormFieldType Type { get; set; }
+
+        /// <summary>
+        /// Whether this field is required.
+        /// </summary>
+        public bool IsRequired { get; set; }
 
         /// <summary>
         /// Optional placeholder for text/number/select fields.
