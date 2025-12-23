@@ -7,6 +7,8 @@
 @using Microsoft.EntityFrameworkCore
 @inject AppDbContext Db
 @inject NavigationManager Navigation
+@inject IConfiguration Configuration
+@inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>Fill Form</PageTitle>
 
@@ -89,6 +91,8 @@ else
                          Fields="Fields"
                          Values="Values"
                          SubmitText="Submit"
+                         ShowCaptcha="@IsCaptchaEnabled"
+                         CaptchaSiteKey="@CaptchaSiteKey"
                          OnSubmit="HandleSubmit" />
         </div>
     </div>
@@ -108,11 +112,23 @@ else
     private string? LastSubmittedJson;
 
     private bool IsLoading = true;
+    private bool IsCaptchaEnabled = false;
+    private string? CaptchaSiteKey;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
+            // Check CAPTCHA configuration
+            IsCaptchaEnabled = Configuration.GetValue<bool>("ReCaptcha:Enabled", false);
+            CaptchaSiteKey = Configuration["ReCaptcha:SiteKey"];
+            
+            // Only enable CAPTCHA if both enabled flag is true AND site key is provided
+            if (IsCaptchaEnabled && string.IsNullOrWhiteSpace(CaptchaSiteKey))
+            {
+                IsCaptchaEnabled = false;
+            }
+            
             // Always load form list
             AllForms = await Db.FormDefinitions
                 .OrderBy(f => f.Name)
@@ -280,6 +296,33 @@ else
 
         try
         {
+            // Validate CAPTCHA if enabled
+            var captchaEnabled = Configuration.GetValue<bool>("ReCaptcha:Enabled", true);
+            if (captchaEnabled)
+            {
+                if (!values.TryGetValue("_captchaResponse", out var captchaResponseObj) || 
+                    string.IsNullOrWhiteSpace(captchaResponseObj?.ToString()))
+                {
+                    if (ToastRef is not null)
+                    {
+                        await ToastRef.ShowAsync("Please complete the CAPTCHA verification.", "danger");
+                    }
+                    return;
+                }
+
+                var captchaResponse = captchaResponseObj.ToString();
+                var secretKey = Configuration["ReCaptcha:SecretKey"];
+                
+                if (!string.IsNullOrWhiteSpace(secretKey) && !await ValidateCaptchaAsync(captchaResponse!, secretKey))
+                {
+                    if (ToastRef is not null)
+                    {
+                        await ToastRef.ShowAsync("CAPTCHA verification failed. Please try again.", "danger");
+                    }
+                    return;
+                }
+            }
+
             var rawJson = System.Text.Json.JsonSerializer.Serialize(values);
             
             // Get the calculated total from the DynamicForm component
@@ -317,5 +360,32 @@ else
     {
         LastSubmittedJson = null;
         Values = new Dictionary<string, object?>();
+    }
+
+    private async Task<bool> ValidateCaptchaAsync(string captchaResponse, string secretKey)
+    {
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient();
+            var requestUri = $"https://www.google.com/recaptcha/api/siteverify?secret={secretKey}&response={captchaResponse}";
+            
+            var response = await httpClient.PostAsync(requestUri, null);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonResponse = await response.Content.ReadAsStringAsync();
+                var result = System.Text.Json.JsonSerializer.Deserialize<CaptchaVerificationResponse>(jsonResponse);
+                return result?.Success == true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error validating CAPTCHA: {ex.Message}");
+        }
+        return false;
+    }
+
+    private class CaptchaVerificationResponse
+    {
+        public bool Success { get; set; }
     }
 }

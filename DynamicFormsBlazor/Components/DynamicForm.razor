@@ -214,7 +214,19 @@
                 </div>
             }
 
-            <button type="submit" class="btn btn-primary">@SubmitText</button>
+            @* reCAPTCHA *@
+            @if (ShowCaptcha)
+            {
+                <div class="mb-3">
+                    <div id="@CaptchaContainerId" data-sitekey="@CaptchaSiteKey"></div>
+                    @if (!string.IsNullOrEmpty(CaptchaError))
+                    {
+                        <div class="text-danger small mt-1">@CaptchaError</div>
+                    }
+                </div>
+            }
+
+            <button type="submit" class="btn btn-primary" disabled="@(!IsCaptchaValid && ShowCaptcha)">@SubmitText</button>
         </form>
     </div>
 </div>
@@ -238,6 +250,28 @@
     [Parameter]
     public EventCallback<Dictionary<string, object?>> OnSubmit { get; set; }
 
+    /// <summary>
+    /// Whether to show reCAPTCHA. Can be set from parent component.
+    /// Defaults to false so only specific screens (like FillForm) enable it.
+    /// </summary>
+    [Parameter]
+    public bool ShowCaptcha { get; set; } = false;
+
+    /// <summary>
+    /// reCAPTCHA site key. Can be passed from parent or read from config.
+    /// </summary>
+    [Parameter]
+    public string? CaptchaSiteKey { get; set; }
+
+    [Inject] private IConfiguration? Configuration { get; set; }
+    [Inject] private IJSRuntime? JSRuntime { get; set; }
+
+    private bool IsCaptchaValid { get; set; } = false;
+    private string CaptchaError { get; set; } = string.Empty;
+    private string? CaptchaResponse { get; set; }
+    private int CaptchaWidgetId { get; set; }
+    private string CaptchaContainerId { get; set; } = string.Empty;
+
     protected override void OnInitialized()
     {
         // Ensure all fields have an entry in the values dictionary
@@ -256,12 +290,92 @@
                 }
             }
         }
+
+        // Get CAPTCHA site key from config if not provided
+        if (ShowCaptcha && string.IsNullOrWhiteSpace(CaptchaSiteKey))
+        {
+            CaptchaSiteKey = Configuration?["ReCaptcha:SiteKey"];
+            var captchaEnabled = Configuration?.GetValue<bool>("ReCaptcha:Enabled", true);
+            if (!captchaEnabled.HasValue || !captchaEnabled.Value || string.IsNullOrWhiteSpace(CaptchaSiteKey))
+            {
+                ShowCaptcha = false;
+            }
+        }
+
+        // Generate unique container ID for this form instance
+        CaptchaContainerId = $"recaptcha-container-{GetHashCode()}";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && ShowCaptcha && !string.IsNullOrWhiteSpace(CaptchaSiteKey) && JSRuntime != null)
+        {
+            try
+            {
+                // Initialize reCAPTCHA widget
+                CaptchaWidgetId = await JSRuntime.InvokeAsync<int>("recaptcha.init", CaptchaContainerId, CaptchaSiteKey);
+                
+                // Register callback for when CAPTCHA is completed
+                await JSRuntime.InvokeVoidAsync("recaptcha.onSuccess", CaptchaWidgetId, 
+                    DotNetObjectReference.Create(this));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing reCAPTCHA: {ex.Message}");
+                ShowCaptcha = false;
+            }
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    [JSInvokable]
+    public void OnCaptchaSuccess(string response)
+    {
+        CaptchaResponse = response;
+        IsCaptchaValid = true;
+        CaptchaError = string.Empty;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnCaptchaExpired()
+    {
+        CaptchaResponse = null;
+        IsCaptchaValid = false;
+        CaptchaError = "CAPTCHA expired. Please verify again.";
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnCaptchaError()
+    {
+        CaptchaResponse = null;
+        IsCaptchaValid = false;
+        CaptchaError = "CAPTCHA verification failed. Please try again.";
+        StateHasChanged();
     }
 
     private async Task HandleSubmit()
     {
+        // Validate CAPTCHA if enabled
+        if (ShowCaptcha)
+        {
+            if (!IsCaptchaValid || string.IsNullOrWhiteSpace(CaptchaResponse))
+            {
+                CaptchaError = "Please complete the CAPTCHA verification.";
+                StateHasChanged();
+                return;
+            }
+        }
+
         if (OnSubmit.HasDelegate)
         {
+            // Include CAPTCHA response in values if present
+            if (!string.IsNullOrWhiteSpace(CaptchaResponse))
+            {
+                Values["_captchaResponse"] = CaptchaResponse;
+            }
+            
             await OnSubmit.InvokeAsync(Values);
         }
     }
