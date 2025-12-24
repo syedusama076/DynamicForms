@@ -3,6 +3,14 @@
 @using System.Text.RegularExpressions
 
 <form class="aoa-form" @onsubmit="HandleSubmit">
+            @* AOA-style global required note - matches exact structure of field labels *@
+            <div class="mb-2 aoa-horizontal-group aoa-label-narrow">
+                <label class="form-label fw-bold mb-0">
+                    <span class="text-danger fst-italic">* Required</span>
+                </label>
+                <div></div>
+            </div>
+
             @foreach (var field in Fields)
             {
                 @if (IsFieldVisible(field))
@@ -13,12 +21,18 @@
                                             && field.Type != FormFieldType.StaticText
                                             && field.Type != FormFieldType.RadioGroup
                                             && field.Type != FormFieldType.Table;
+                    
+                    // Calculate label width dynamically based on label text length
+                    var labelText = GetDisplayLabel(field);
+                    var cleanLabelText = System.Text.RegularExpressions.Regex.Replace(labelText, "<[^>]*>", ""); // Remove HTML tags
+                    var labelLength = cleanLabelText.Length;
+                    var labelWidthClass = labelLength > 50 ? "aoa-label-wide" : "aoa-label-narrow";
 
-                    <div class="mb-3 @(isHorizontalField ? "aoa-horizontal-group" : string.Empty)" 
+                    <div class="mb-3 @(isHorizontalField ? $"aoa-horizontal-group {labelWidthClass}" : string.Empty)" 
                          style="@(nestingLevel > 0 ? $"margin-left: {marginLeft}px; padding-left: 12px; border-left: 2px solid #dee2e6;" : "")">
                         @if (field.Type != FormFieldType.Checkbox && field.Type != FormFieldType.StaticText && field.Type != FormFieldType.RadioGroup && field.Type != FormFieldType.Table)
                         {
-                            <label class="form-label">@((MarkupString)GetDisplayLabel(field))</label>
+                            <label class="form-label fw-bold">@((MarkupString)labelText)</label>
                         }
                         @if (field.Type == FormFieldType.Table && !string.IsNullOrWhiteSpace(field.Label))
                         {
@@ -209,29 +223,21 @@
             }
 
             <div class="aoa-form-footer">
-                @* Always show total if there are priced fields *@
+                @* Always show total if there are priced fields - matches field label structure *@
                 @if (HasPricedFields)
                 {
-                    <div class="mb-3 aoa-grand-total-row">
-                        <span class="aoa-grand-total-label">Grand Total (USD):</span>
-                        <span class="aoa-grand-total-amount">@CalculateTotal().ToString("0.##")</span>
-                    </div>
-                }
-
-                @* reCAPTCHA *@
-                @if (ShowCaptcha)
-                {
-                    <div class="mb-3">
-                        <div id="@CaptchaContainerId" data-sitekey="@CaptchaSiteKey"></div>
-                        @if (!string.IsNullOrEmpty(CaptchaError))
-                        {
-                            <div class="text-danger small mt-1">@CaptchaError</div>
-                        }
+                    <div class="mb-3 aoa-horizontal-group aoa-label-narrow aoa-grand-total-row">
+                        <label class="form-label fw-bold mb-0">
+                            <span class="aoa-grand-total-label">Grand Total (USD):</span>
+                        </label>
+                        <div>
+                            <span class="aoa-grand-total-amount">@CalculateTotal().ToString("0.##")</span>
+                        </div>
                     </div>
                 }
 
                 <div class="aoa-footer-actions">
-                    <button type="submit" class="btn btn-primary" disabled="@(!IsCaptchaValid && ShowCaptcha)">@SubmitText</button>
+                    <button type="submit" class="btn btn-primary">@SubmitText</button>
                 </div>
             </div>
         </form>
@@ -255,28 +261,6 @@
     [Parameter]
     public EventCallback<Dictionary<string, object?>> OnSubmit { get; set; }
 
-    /// <summary>
-    /// Whether to show reCAPTCHA. Can be set from parent component.
-    /// Defaults to false so only specific screens (like FillForm) enable it.
-    /// </summary>
-    [Parameter]
-    public bool ShowCaptcha { get; set; } = false;
-
-    /// <summary>
-    /// reCAPTCHA site key. Can be passed from parent or read from config.
-    /// </summary>
-    [Parameter]
-    public string? CaptchaSiteKey { get; set; }
-
-    [Inject] private IConfiguration? Configuration { get; set; }
-    [Inject] private IJSRuntime? JSRuntime { get; set; }
-
-    private bool IsCaptchaValid { get; set; } = false;
-    private string CaptchaError { get; set; } = string.Empty;
-    private string? CaptchaResponse { get; set; }
-    private int CaptchaWidgetId { get; set; }
-    private string CaptchaContainerId { get; set; } = string.Empty;
-
     protected override void OnInitialized()
     {
         // Ensure all fields have an entry in the values dictionary
@@ -295,92 +279,12 @@
                 }
             }
         }
-
-        // Get CAPTCHA site key from config if not provided
-        if (ShowCaptcha && string.IsNullOrWhiteSpace(CaptchaSiteKey))
-        {
-            CaptchaSiteKey = Configuration?["ReCaptcha:SiteKey"];
-            var captchaEnabled = Configuration?.GetValue<bool>("ReCaptcha:Enabled", true);
-            if (!captchaEnabled.HasValue || !captchaEnabled.Value || string.IsNullOrWhiteSpace(CaptchaSiteKey))
-            {
-                ShowCaptcha = false;
-            }
-        }
-
-        // Generate unique container ID for this form instance
-        CaptchaContainerId = $"recaptcha-container-{GetHashCode()}";
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && ShowCaptcha && !string.IsNullOrWhiteSpace(CaptchaSiteKey) && JSRuntime != null)
-        {
-            try
-            {
-                // Initialize reCAPTCHA widget
-                CaptchaWidgetId = await JSRuntime.InvokeAsync<int>("recaptcha.init", CaptchaContainerId, CaptchaSiteKey);
-                
-                // Register callback for when CAPTCHA is completed
-                await JSRuntime.InvokeVoidAsync("recaptcha.onSuccess", CaptchaWidgetId, 
-                    DotNetObjectReference.Create(this));
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error initializing reCAPTCHA: {ex.Message}");
-                ShowCaptcha = false;
-            }
-        }
-        await base.OnAfterRenderAsync(firstRender);
-    }
-
-    [JSInvokable]
-    public void OnCaptchaSuccess(string response)
-    {
-        CaptchaResponse = response;
-        IsCaptchaValid = true;
-        CaptchaError = string.Empty;
-        StateHasChanged();
-    }
-
-    [JSInvokable]
-    public void OnCaptchaExpired()
-    {
-        CaptchaResponse = null;
-        IsCaptchaValid = false;
-        CaptchaError = "CAPTCHA expired. Please verify again.";
-        StateHasChanged();
-    }
-
-    [JSInvokable]
-    public void OnCaptchaError()
-    {
-        CaptchaResponse = null;
-        IsCaptchaValid = false;
-        CaptchaError = "CAPTCHA verification failed. Please try again.";
-        StateHasChanged();
     }
 
     private async Task HandleSubmit()
     {
-        // Validate CAPTCHA if enabled
-        if (ShowCaptcha)
-        {
-            if (!IsCaptchaValid || string.IsNullOrWhiteSpace(CaptchaResponse))
-            {
-                CaptchaError = "Please complete the CAPTCHA verification.";
-                StateHasChanged();
-                return;
-            }
-        }
-
         if (OnSubmit.HasDelegate)
         {
-            // Include CAPTCHA response in values if present
-            if (!string.IsNullOrWhiteSpace(CaptchaResponse))
-            {
-                Values["_captchaResponse"] = CaptchaResponse;
-            }
-            
             await OnSubmit.InvokeAsync(Values);
         }
     }

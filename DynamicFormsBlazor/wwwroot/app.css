@@ -103,10 +103,7 @@ h1:focus {
     border-top: 1px solid #ddd;
 }
 
-.aoa-required-note {
-    font-style: italic;
-    text-align: left;
-}
+/* Required note styling - inherits from aoa-horizontal-group */
 
 /* Match original AOA form's base label + error styling */
 .aoa-form label {
@@ -124,7 +121,6 @@ h1:focus {
 
 .aoa-grand-total-label {
     font-weight: 700;
-    margin-right: 0.25rem;
 }
 
 .aoa-grand-total-amount {
@@ -158,18 +154,38 @@ h1:focus {
     align-items: center;
 }
 
-.aoa-form .aoa-horizontal-group > label.form-label {
-    font-weight: normal;
-    width: 50%;
+/* Narrow labels (30%) for short labels like "First Name", "Last Name", etc. */
+.aoa-form .aoa-horizontal-group.aoa-label-narrow > label.form-label {
+    font-weight: bold;
+    width: 30%;
     margin-bottom: 0;
+    flex-shrink: 0;
 }
 
-.aoa-form .aoa-horizontal-group > :not(label) {
-    flex: 1 1 50%;
+.aoa-form .aoa-horizontal-group.aoa-label-narrow > :not(label):not(.form-text) {
+    flex: 1 1 70%;
+    min-width: 0;
 }
 
-/* Help text should align under the input column */
-.aoa-form .aoa-horizontal-group > .form-text {
-    margin-left: 50%;
-    flex-basis: 50%;
+.aoa-form .aoa-horizontal-group.aoa-label-narrow > .form-text {
+    margin-left: 30%;
+    flex-basis: 70%;
+}
+
+/* Wide labels (55%) for long labels like "I would like to sponsor dinner..." */
+.aoa-form .aoa-horizontal-group.aoa-label-wide > label.form-label {
+    font-weight: bold;
+    width: 55%;
+    margin-bottom: 0;
+    flex-shrink: 0;
+}
+
+.aoa-form .aoa-horizontal-group.aoa-label-wide > :not(label):not(.form-text) {
+    flex: 1 1 45%;
+    min-width: 0;
+}
+
+.aoa-form .aoa-horizontal-group.aoa-label-wide > .form-text {
+    margin-left: 55%;
+    flex-basis: 45%;
 }

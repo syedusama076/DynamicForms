@@ -7,8 +7,6 @@
 @using Microsoft.EntityFrameworkCore
 @inject AppDbContext Db
 @inject NavigationManager Navigation
-@inject IConfiguration Configuration
-@inject IHttpClientFactory HttpClientFactory
 
 <PageTitle>Fill Form</PageTitle>
 
@@ -41,7 +39,7 @@ else if (FormName is null)
                 <div class="list-group-item">
                     <div class="d-flex w-100 justify-content-between align-items-start">
                         <div class="flex-grow-1">
-                            <a class="text-decoration-none" href="@($"/fill-form/{form.Name.Replace(" ", "")}")">
+                            <a class="text-decoration-none" href="@($"/fill-form/{Uri.EscapeDataString(form.Name.Replace(" ", ""))}")">
                                 <h5 class="mb-1">@form.Name</h5>
                             </a>
                             @if (!string.IsNullOrWhiteSpace(form.Description))
@@ -51,7 +49,7 @@ else if (FormName is null)
                             <small class="text-muted">ID: @form.Id</small>
                         </div>
                         <div class="ms-3">
-                            <a class="btn btn-sm btn-outline-primary" href="@($"/form-designer/{form.Name.Replace(" ", "")}")" title="Edit Form">
+                            <a class="btn btn-sm btn-outline-primary" href="@($"/form-designer/{Uri.EscapeDataString(form.Name.Replace(" ", ""))}")" title="Edit Form">
                                 ✏️ Edit
                             </a>
                         </div>
@@ -73,19 +71,19 @@ else
 {
     <div class="aoa-form-header mb-2">
         <div class="d-flex justify-content-between align-items-start">
-            <div class="flex-grow-1 text-center pe-3">
-                <h2 class="mb-2">@FormDefinition.Name</h2>
+            <div class="flex-grow-1 pe-3">
+                <h2 class="mb-2 text-center">@FormDefinition.Name</h2>
                 @if (!string.IsNullOrWhiteSpace(FormDefinition.Description))
                 {
-                    <p class="mb-0">@FormDefinition.Description</p>
+                    <p class="mb-0 text-left">@FormDefinition.Description</p>
                 }
             </div>
-            <div class="ms-2">
+            <!-- <div class="ms-2">
                 <a class="aoa-edit-btn" href="@($"/form-designer/{FormDefinition.Name.Replace(" ", "")}")" title="Edit form layout">
                     <span class="aoa-edit-icon">✏️</span>
                     <span>Edit</span>
                 </a>
-            </div>
+            </div> -->
         </div>
     </div>
 
@@ -93,17 +91,10 @@ else
 
     <div class="row justify-content-center">
         <div class="col-lg-8 col-md-10">
-            @* Match original AOA form's "* Required" row (aligned with field labels) *@
-            <div class="aoa-required-note text-danger mb-2">
-                <span>* Required</span>
-            </div>
-
             <DynamicForm @ref="DynamicFormRef"
                          Fields="Fields"
                          Values="Values"
                          SubmitText="Submit/Pay Now"
-                         ShowCaptcha="@IsCaptchaEnabled"
-                         CaptchaSiteKey="@CaptchaSiteKey"
                          OnSubmit="HandleSubmit" />
         </div>
     </div>
@@ -123,23 +114,11 @@ else
     private string? LastSubmittedJson;
 
     private bool IsLoading = true;
-    private bool IsCaptchaEnabled = false;
-    private string? CaptchaSiteKey;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            // Check CAPTCHA configuration
-            IsCaptchaEnabled = Configuration.GetValue<bool>("ReCaptcha:Enabled", false);
-            CaptchaSiteKey = Configuration["ReCaptcha:SiteKey"];
-            
-            // Only enable CAPTCHA if both enabled flag is true AND site key is provided
-            if (IsCaptchaEnabled && string.IsNullOrWhiteSpace(CaptchaSiteKey))
-            {
-                IsCaptchaEnabled = false;
-            }
-            
             // Always load form list
             AllForms = await Db.FormDefinitions
                 .OrderBy(f => f.Name)
@@ -148,47 +127,71 @@ else
             // If a specific form name is requested, load that form
             if (FormName is not null)
             {
-                // FormName in URL has spaces removed, so we need to compare with normalized names
-                FormDefinition = await Db.FormDefinitions
-                    .Include(f => f.Fields)
-                    .ThenInclude(f => f.Options)
-                    .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == FormName);
+                // Decode URL-encoded form name and normalize (remove spaces)
+                var decodedFormName = Uri.UnescapeDataString(FormName);
+                var normalizedFormName = decodedFormName.Replace(" ", "");
+                
+                // Try to parse as ID first, then fall back to name lookup
+                if (int.TryParse(normalizedFormName, out var formId))
+                {
+                    // Look up by ID - use AsSplitQuery to avoid potential issues with multiple collections
+                    FormDefinition = await Db.FormDefinitions
+                        .Include(f => f.Fields)
+                            .ThenInclude(f => f.Options)
+                        .AsSplitQuery()
+                        .FirstOrDefaultAsync(f => f.Id == formId);
+                }
+                else
+                {
+                    // FormName in URL has spaces removed, so we need to compare with normalized names
+                    FormDefinition = await Db.FormDefinitions
+                        .Include(f => f.Fields)
+                        .ThenInclude(f => f.Options)
+                        .AsSplitQuery()
+                        .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == normalizedFormName);
+                }
 
                 if (FormDefinition is not null)
                 {
-                    Fields = FormDefinition.Fields.Select(f => 
+                    if (FormDefinition.Fields == null)
                     {
-                        // Load option prices from DefaultValueJson (stored as JSON dictionary)
-                        var optionPrices = ParseOptionPrices(f.DefaultValueJson);
-                        
-                        return new DynamicForm.FormField
+                        Fields = new List<DynamicForm.FormField>();
+                    }
+                    else
+                    {
+                        Fields = FormDefinition.Fields.Select(f => 
                         {
-                            Key = f.Key,
-                            Label = f.Label,
-                            Type = f.Type,
-                            IsRequired = f.IsRequired,
-                            Placeholder = f.Placeholder,
-                            CheckboxLabel = f.CheckboxLabel,
-                            HelpText = f.HelpText,
-                            DefaultValue = ParseDefaultValue(f.DefaultValueJson),
-                            Price = f.Price,
-                            ParentFieldKey = f.ParentFieldKey,
-                            MutuallyExclusiveWith = ParseMutuallyExclusiveWith(f.MutuallyExclusiveWith),
-                            Options = f.Options.Select(o => new DynamicForm.FormFieldOption
+                            // Load option prices from DefaultValueJson (stored as JSON dictionary)
+                            var optionPrices = ParseOptionPrices(f.DefaultValueJson);
+                            
+                            return new DynamicForm.FormField
                             {
-                                Value = o.Value,
-                                Text = o.Text,
-                                Price = optionPrices.TryGetValue(o.Value, out var price) ? price : (decimal?)null
-                            }).ToList()
-                        };
-                    }).ToList();
+                                Key = f.Key ?? string.Empty,
+                                Label = f.Label ?? string.Empty,
+                                Type = f.Type,
+                                IsRequired = f.IsRequired,
+                                Placeholder = f.Placeholder,
+                                CheckboxLabel = f.CheckboxLabel,
+                                HelpText = f.HelpText,
+                                DefaultValue = ParseDefaultValue(f.DefaultValueJson),
+                                Price = f.Price,
+                                ParentFieldKey = f.ParentFieldKey,
+                                MutuallyExclusiveWith = ParseMutuallyExclusiveWith(f.MutuallyExclusiveWith),
+                                Options = f.Options?.Select(o => new DynamicForm.FormFieldOption
+                                {
+                                    Value = o.Value ?? string.Empty,
+                                    Text = o.Text ?? string.Empty,
+                                    Price = optionPrices.TryGetValue(o.Value ?? string.Empty, out var price) ? price : (decimal?)null
+                                }).ToList() ?? new List<DynamicForm.FormFieldOption>()
+                            };
+                        }).ToList();
+                    }
                 }
             }
         }
         catch (Exception ex)
         {
-            // Log error in production
-            Console.WriteLine($"Error loading forms: {ex.Message}");
+            // Error loading forms - silently continue
         }
         finally
         {
@@ -298,9 +301,6 @@ else
 
     private async Task HandleSubmit(Dictionary<string, object?> values)
     {
-        LastSubmittedJson = System.Text.Json.JsonSerializer.Serialize(
-            values,
-            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         if (FormName is null || FormDefinition is null)
         {
             return;
@@ -308,31 +308,24 @@ else
 
         try
         {
-            // Validate CAPTCHA if enabled
-            var captchaEnabled = Configuration.GetValue<bool>("ReCaptcha:Enabled", true);
-            if (captchaEnabled)
+            // Validate required fields
+            var missingRequiredFields = new List<string>();
+            foreach (var field in Fields!)
             {
-                if (!values.TryGetValue("_captchaResponse", out var captchaResponseObj) || 
-                    string.IsNullOrWhiteSpace(captchaResponseObj?.ToString()))
+                if (field.IsRequired && IsFieldValueEmpty(field, values))
                 {
-                    if (ToastRef is not null)
-                    {
-                        await ToastRef.ShowAsync("Please complete the CAPTCHA verification.", "danger");
-                    }
-                    return;
+                    missingRequiredFields.Add(field.Label ?? field.Key);
                 }
+            }
 
-                var captchaResponse = captchaResponseObj.ToString();
-                var secretKey = Configuration["ReCaptcha:SecretKey"];
-                
-                if (!string.IsNullOrWhiteSpace(secretKey) && !await ValidateCaptchaAsync(captchaResponse!, secretKey))
+            if (missingRequiredFields.Count > 0)
+            {
+                if (ToastRef is not null)
                 {
-                    if (ToastRef is not null)
-                    {
-                        await ToastRef.ShowAsync("CAPTCHA verification failed. Please try again.", "danger");
-                    }
-                    return;
+                    var fieldsList = string.Join(", ", missingRequiredFields);
+                    await ToastRef.ShowAsync($"Please fill in all required fields: {fieldsList}", "danger");
                 }
+                return;
             }
 
             var rawJson = System.Text.Json.JsonSerializer.Serialize(values);
@@ -344,11 +337,20 @@ else
             {
                 FormDefinitionId = FormDefinition.Id,
                 DataJson = rawJson,
-                TotalAmount = totalAmount
+                TotalAmount = totalAmount,
+                SubmittedAt = DateTime.UtcNow
             };
 
             Db.FormSubmissions.Add(submission);
             await Db.SaveChangesAsync();
+
+            // Store for debugging (optional)
+            LastSubmittedJson = System.Text.Json.JsonSerializer.Serialize(
+                values,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+            // Reset form after successful submission
+            ResetForm();
 
             if (ToastRef is not null)
             {
@@ -360,11 +362,52 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error saving form submission: {ex.Message}");
             if (ToastRef is not null)
             {
-                await ToastRef.ShowAsync("Error saving form submission. Please try again.", "danger");
+                await ToastRef.ShowAsync($"Error saving form submission: {ex.Message}", "danger");
             }
+        }
+    }
+
+    private bool IsFieldValueEmpty(DynamicForm.FormField field, Dictionary<string, object?> values)
+    {
+        if (!values.TryGetValue(field.Key, out var value) || value == null)
+        {
+            return true;
+        }
+
+        // Check different field types
+        switch (field.Type)
+        {
+            case DynamicForm.FormFieldType.Checkbox:
+                // For checkboxes, empty means unchecked (false)
+                return !(value is bool boolValue && boolValue);
+            
+            case DynamicForm.FormFieldType.Table:
+                // For tables, empty means no rows
+                if (value is List<Dictionary<string, object?>> tableData)
+                {
+                    return tableData.Count == 0;
+                }
+                return true;
+            
+            case DynamicForm.FormFieldType.Number:
+                // For numbers, empty means null or empty string (zero is a valid value)
+                if (value is string strValue)
+                {
+                    return string.IsNullOrWhiteSpace(strValue);
+                }
+                // If it's already a number type, it's not empty
+                return false;
+            
+            case DynamicForm.FormFieldType.Select:
+            case DynamicForm.FormFieldType.RadioGroup:
+                // For selects/radios, empty means no selection
+                return string.IsNullOrWhiteSpace(value?.ToString());
+            
+            default:
+                // For text/date fields, empty means null or whitespace
+                return string.IsNullOrWhiteSpace(value?.ToString());
         }
     }
 
@@ -374,30 +417,4 @@ else
         Values = new Dictionary<string, object?>();
     }
 
-    private async Task<bool> ValidateCaptchaAsync(string captchaResponse, string secretKey)
-    {
-        try
-        {
-            var httpClient = HttpClientFactory.CreateClient();
-            var requestUri = $"https://www.google.com/recaptcha/api/siteverify?secret={secretKey}&response={captchaResponse}";
-            
-            var response = await httpClient.PostAsync(requestUri, null);
-            if (response.IsSuccessStatusCode)
-            {
-                var jsonResponse = await response.Content.ReadAsStringAsync();
-                var result = System.Text.Json.JsonSerializer.Deserialize<CaptchaVerificationResponse>(jsonResponse);
-                return result?.Success == true;
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error validating CAPTCHA: {ex.Message}");
-        }
-        return false;
-    }
-
-    private class CaptchaVerificationResponse
-    {
-        public bool Success { get; set; }
-    }
 }

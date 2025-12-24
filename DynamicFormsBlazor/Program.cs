@@ -12,7 +12,7 @@ builder.Services.AddRazorComponents()
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Add HttpClient for CAPTCHA validation
+// Add HttpClient for general HTTP requests
 builder.Services.AddHttpClient();
 
 var app = builder.Build();

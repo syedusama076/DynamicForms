@@ -373,11 +373,15 @@
         {
             try
             {
+                // Decode URL-encoded form name and normalize (remove spaces)
+                var decodedFormName = Uri.UnescapeDataString(FormName);
+                var normalizedFormName = decodedFormName.Replace(" ", "");
+                
                 // FormName in URL has spaces removed, so we need to compare with normalized names
                 var existingForm = await Db.FormDefinitions
                     .Include(f => f.Fields)
                     .ThenInclude(f => f.Options)
-                    .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == FormName);
+                    .FirstOrDefaultAsync(f => f.Name.Replace(" ", "") == normalizedFormName);
 
                 if (existingForm is not null)
                 {
@@ -993,7 +997,7 @@
             
             // Navigate to view the form after a short delay
             await Task.Delay(1500);
-            Navigation.NavigateTo($"/fill-form/{form.Name.Replace(" ", "")}");
+            Navigation.NavigateTo($"/fill-form/{Uri.EscapeDataString(form.Name.Replace(" ", ""))}");
         }
         catch (Exception ex)
         {
